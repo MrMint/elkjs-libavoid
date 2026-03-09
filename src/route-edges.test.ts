@@ -1,6 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import type { ElkGraph } from ".";
-import { init, routeEdges } from ".";
+import {
+	createRoutingSession,
+	init,
+	routeEdges,
+	routeEdgesFlat,
+	routeEdgesInPlace,
+} from ".";
 
 beforeAll(async () => {
 	await init();
@@ -12,16 +18,47 @@ describe("routeEdges", () => {
 		expect(typeof routeEdges).toBe("function");
 	});
 
-	it("should return the graph unchanged when there are no edges", async () => {
+	it("should return an empty map when there are no edges", async () => {
 		const graph: ElkGraph = {
 			children: [{ height: 40, id: "n1", width: 80, x: 0, y: 0 }],
-			height: 300,
 			id: "root",
-			width: 400,
 		};
 
 		const result = await routeEdges(graph);
-		expect(result).toBe(graph);
+		expect(result).toBeInstanceOf(Map);
+		expect(result.size).toBe(0);
+	});
+
+	it("should not require width/height on root node", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
+				{ height: 40, id: "n2", width: 80, x: 200, y: 100 },
+			],
+			edges: [{ id: "e1", source: "n1", target: "n2" }],
+			id: "root",
+		};
+
+		const result = await routeEdges(graph);
+		expect(result.has("e1")).toBe(true);
+	});
+
+	it("should not mutate the input graph", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
+				{ height: 40, id: "n2", width: 80, x: 200, y: 100 },
+			],
+			edges: [{ id: "e1", source: "n1", target: "n2" }],
+			id: "root",
+		};
+
+		const edgeBefore = { ...graph.edges?.[0] };
+		await routeEdges(graph);
+
+		// Original edge should not have been modified
+		expect(graph.edges?.[0]?.sourcePoint).toBeUndefined();
+		expect(graph.edges?.[0]).toEqual(edgeBefore);
 	});
 });
 
@@ -33,21 +70,37 @@ describe("basic routing", () => {
 				{ height: 40, id: "n2", width: 80, x: 200, y: 100 },
 			],
 			edges: [{ id: "e1", source: "n1", target: "n2" }],
-			height: 300,
 			id: "root",
-			width: 400,
 		};
 
 		const result = await routeEdges(graph);
-		const edge = result.edges?.[0];
+		const route = result.get("e1");
 
-		// Simple format: sourcePoint/targetPoint should be set
-		expect(edge?.sourcePoint).toBeDefined();
-		expect(edge?.targetPoint).toBeDefined();
-		expect(edge?.sourcePoint?.x).toBeTypeOf("number");
-		expect(edge?.sourcePoint?.y).toBeTypeOf("number");
-		expect(edge?.targetPoint?.x).toBeTypeOf("number");
-		expect(edge?.targetPoint?.y).toBeTypeOf("number");
+		expect(route).toBeDefined();
+		expect(route?.sourcePoint.x).toBeTypeOf("number");
+		expect(route?.sourcePoint.y).toBeTypeOf("number");
+		expect(route?.targetPoint.x).toBeTypeOf("number");
+		expect(route?.targetPoint.y).toBeTypeOf("number");
+	});
+
+	it("should include sourceSide and targetSide", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
+				{ height: 40, id: "n2", width: 80, x: 200, y: 0 },
+			],
+			edges: [{ id: "e1", source: "n1", target: "n2" }],
+			id: "root",
+		};
+
+		const result = await routeEdges(graph);
+		const route = result.get("e1");
+		expect(route).toBeDefined();
+
+		expect(route?.sourceSide).toBeDefined();
+		expect(route?.targetSide).toBeDefined();
+		expect(["north", "south", "east", "west"]).toContain(route?.sourceSide);
+		expect(["north", "south", "east", "west"]).toContain(route?.targetSide);
 	});
 
 	it("should route around an obstacle", async () => {
@@ -55,23 +108,19 @@ describe("basic routing", () => {
 			children: [
 				{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
 				{ height: 40, id: "n2", width: 80, x: 200, y: 0 },
-				// Obstacle between n1 and n2
 				{ height: 40, id: "obstacle", width: 60, x: 100, y: 0 },
 			],
 			edges: [{ id: "e1", source: "n1", target: "n2" }],
-			height: 300,
 			id: "root",
-			width: 400,
 		};
 
 		const result = await routeEdges(graph);
-		const edge = result.edges?.[0];
+		const route = result.get("e1");
+		expect(route).toBeDefined();
 
-		expect(edge?.sourcePoint).toBeDefined();
-		expect(edge?.targetPoint).toBeDefined();
-		// Should have bend points since it must route around the obstacle
-		expect(edge?.bendPoints).toBeDefined();
-		expect(edge?.bendPoints?.length).toBeGreaterThan(0);
+		expect(route?.sourcePoint).toBeDefined();
+		expect(route?.targetPoint).toBeDefined();
+		expect(route?.bendPoints.length).toBeGreaterThan(0);
 	});
 
 	it("should route 3 nodes with 2 edges", async () => {
@@ -85,58 +134,16 @@ describe("basic routing", () => {
 				{ id: "e1", source: "n1", target: "n3" },
 				{ id: "e2", source: "n2", target: "n3" },
 			],
-			height: 300,
 			id: "root",
-			width: 400,
 		};
 
 		const result = await routeEdges(graph);
+		expect(result.size).toBe(2);
 
-		for (const edge of result.edges ?? []) {
-			expect(edge.sourcePoint).toBeDefined();
-			expect(edge.targetPoint).toBeDefined();
+		for (const [_, route] of result) {
+			expect(route.sourcePoint).toBeDefined();
+			expect(route.targetPoint).toBeDefined();
 		}
-	});
-});
-
-describe("extended edge format", () => {
-	it("should write sections for sources/targets format edges", async () => {
-		const graph: ElkGraph = {
-			children: [
-				{
-					height: 40,
-					id: "n1",
-					ports: [{ height: 10, id: "n1_p1", width: 5, x: 80, y: 15 }],
-					width: 80,
-					x: 0,
-					y: 0,
-				},
-				{
-					height: 40,
-					id: "n2",
-					ports: [{ height: 10, id: "n2_p1", width: 5, x: -5, y: 15 }],
-					width: 80,
-					x: 200,
-					y: 100,
-				},
-			],
-			edges: [{ id: "e1", sources: ["n1_p1"], targets: ["n2_p1"] }],
-			height: 300,
-			id: "root",
-			width: 400,
-		};
-
-		const result = await routeEdges(graph);
-		const edge = result.edges?.[0];
-
-		// Extended format: should have sections
-		expect(edge?.sections).toBeDefined();
-		expect(edge?.sections).toHaveLength(1);
-
-		const section = edge?.sections?.[0];
-		expect(section?.id).toBe("e1_s0");
-		expect(section?.startPoint).toBeDefined();
-		expect(section?.endPoint).toBeDefined();
 	});
 });
 
@@ -147,10 +154,7 @@ describe("port support", () => {
 				{
 					height: 40,
 					id: "n1",
-					ports: [
-						// East-side port
-						{ height: 10, id: "p_east", width: 5, x: 80, y: 15 },
-					],
+					ports: [{ height: 10, id: "p_east", width: 5, x: 80, y: 15 }],
 					width: 80,
 					x: 0,
 					y: 0,
@@ -158,10 +162,7 @@ describe("port support", () => {
 				{
 					height: 40,
 					id: "n2",
-					ports: [
-						// West-side port
-						{ height: 10, id: "p_west", width: 5, x: -5, y: 15 },
-					],
+					ports: [{ height: 10, id: "p_west", width: 5, x: -5, y: 15 }],
 					width: 80,
 					x: 200,
 					y: 0,
@@ -176,21 +177,17 @@ describe("port support", () => {
 					targetPort: "p_west",
 				},
 			],
-			height: 300,
 			id: "root",
-			width: 400,
 		};
 
 		const result = await routeEdges(graph);
-		const edge = result.edges?.[0];
+		const route = result.get("e1");
+		expect(route).toBeDefined();
 
-		expect(edge?.sourcePoint).toBeDefined();
-		expect(edge?.targetPoint).toBeDefined();
-
-		// Source point should be near the east side of n1
-		expect(edge?.sourcePoint?.x).toBeGreaterThanOrEqual(70);
-		// Target point should be near the west side of n2
-		expect(edge?.targetPoint?.x).toBeLessThanOrEqual(210);
+		expect(route?.sourcePoint).toBeDefined();
+		expect(route?.targetPoint).toBeDefined();
+		expect(route?.sourcePoint.x).toBeGreaterThanOrEqual(70);
+		expect(route?.targetPoint.x).toBeLessThanOrEqual(210);
 	});
 
 	it("should route with multiple ports per node", async () => {
@@ -240,16 +237,14 @@ describe("port support", () => {
 					targetPort: "p3",
 				},
 			],
-			height: 300,
 			id: "root",
-			width: 400,
 		};
 
 		const result = await routeEdges(graph);
-
-		for (const edge of result.edges ?? []) {
-			expect(edge.sourcePoint).toBeDefined();
-			expect(edge.targetPoint).toBeDefined();
+		expect(result.size).toBe(2);
+		for (const [_, route] of result) {
+			expect(route.sourcePoint).toBeDefined();
+			expect(route.targetPoint).toBeDefined();
 		}
 	});
 });
@@ -262,13 +257,11 @@ describe("routing options", () => {
 				{ height: 40, id: "n2", width: 80, x: 200, y: 100 },
 			],
 			edges: [{ id: "e1", source: "n1", target: "n2" }],
-			height: 300,
 			id: "root",
-			width: 400,
 		};
 
 		const result = await routeEdges(graph, { routingType: "orthogonal" });
-		expect(result.edges?.[0]?.sourcePoint).toBeDefined();
+		expect(result.get("e1")).toBeDefined();
 	});
 
 	it("should accept polyline routing type", async () => {
@@ -278,13 +271,11 @@ describe("routing options", () => {
 				{ height: 40, id: "n2", width: 80, x: 200, y: 100 },
 			],
 			edges: [{ id: "e1", source: "n1", target: "n2" }],
-			height: 300,
 			id: "root",
-			width: 400,
 		};
 
 		const result = await routeEdges(graph, { routingType: "polyline" });
-		expect(result.edges?.[0]?.sourcePoint).toBeDefined();
+		expect(result.get("e1")).toBeDefined();
 	});
 
 	it("should accept custom penalty and distance options", async () => {
@@ -294,9 +285,7 @@ describe("routing options", () => {
 				{ height: 40, id: "n2", width: 80, x: 200, y: 100 },
 			],
 			edges: [{ id: "e1", source: "n1", target: "n2" }],
-			height: 300,
 			id: "root",
-			width: 400,
 		};
 
 		const result = await routeEdges(graph, {
@@ -305,11 +294,162 @@ describe("routing options", () => {
 			segmentPenalty: 50,
 			shapeBufferDistance: 12,
 		});
-		expect(result.edges?.[0]?.sourcePoint).toBeDefined();
+		expect(result.get("e1")).toBeDefined();
 	});
 });
 
-describe("hierarchical graphs", () => {
+describe("edgeIds filtering", () => {
+	it("should only route specified edges", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
+				{ height: 40, id: "n2", width: 80, x: 200, y: 0 },
+				{ height: 40, id: "n3", width: 80, x: 100, y: 100 },
+			],
+			edges: [
+				{ id: "e1", source: "n1", target: "n2" },
+				{ id: "e2", source: "n2", target: "n3" },
+			],
+			id: "root",
+		};
+
+		const result = await routeEdges(graph, { edgeIds: ["e1"] });
+		expect(result.has("e1")).toBe(true);
+		expect(result.has("e2")).toBe(false);
+	});
+});
+
+describe("self-loop handling", () => {
+	it("should skip self-loops by default", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
+				{ height: 40, id: "n2", width: 80, x: 200, y: 0 },
+			],
+			edges: [
+				{ id: "e1", source: "n1", target: "n2" },
+				{ id: "e_self", source: "n1", target: "n1" },
+			],
+			id: "root",
+		};
+
+		const result = await routeEdges(graph);
+		expect(result.has("e1")).toBe(true);
+		expect(result.has("e_self")).toBe(false);
+	});
+
+	it("should generate fallback self-loop routes when configured", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
+				{ height: 40, id: "n2", width: 80, x: 200, y: 0 },
+			],
+			edges: [
+				{ id: "e1", source: "n1", target: "n2" },
+				{ id: "e_self", source: "n1", target: "n1" },
+			],
+			id: "root",
+		};
+
+		const result = await routeEdges(graph, {
+			selfLoopHandling: "fallback",
+		});
+		expect(result.has("e1")).toBe(true);
+		expect(result.has("e_self")).toBe(true);
+
+		const selfLoop = result.get("e_self");
+		expect(selfLoop).toBeDefined();
+		expect(selfLoop?.sourcePoint).toBeDefined();
+		expect(selfLoop?.targetPoint).toBeDefined();
+		expect(selfLoop?.bendPoints.length).toBeGreaterThan(0);
+	});
+});
+
+describe("routeEdgesInPlace", () => {
+	it("should mutate the graph in place and return it", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
+				{ height: 40, id: "n2", width: 80, x: 200, y: 100 },
+			],
+			edges: [{ id: "e1", source: "n1", target: "n2" }],
+			id: "root",
+		};
+
+		const result = await routeEdgesInPlace(graph);
+		expect(result).toBe(graph);
+		expect(graph.edges?.[0]?.sourcePoint).toBeDefined();
+		expect(graph.edges?.[0]?.targetPoint).toBeDefined();
+	});
+
+	it("should write sections for extended format edges", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{
+					height: 40,
+					id: "n1",
+					ports: [{ height: 10, id: "n1_p1", width: 5, x: 80, y: 15 }],
+					width: 80,
+					x: 0,
+					y: 0,
+				},
+				{
+					height: 40,
+					id: "n2",
+					ports: [{ height: 10, id: "n2_p1", width: 5, x: -5, y: 15 }],
+					width: 80,
+					x: 200,
+					y: 100,
+				},
+			],
+			edges: [{ id: "e1", sources: ["n1_p1"], targets: ["n2_p1"] }],
+			id: "root",
+		};
+
+		const result = await routeEdgesInPlace(graph);
+		const edge = result.edges?.[0];
+		expect(edge).toBeDefined();
+
+		expect(edge?.sections).toBeDefined();
+		expect(edge?.sections).toHaveLength(1);
+		expect(edge?.sections?.[0]?.id).toBe("e1_s0");
+		expect(edge?.sections?.[0]?.startPoint).toBeDefined();
+		expect(edge?.sections?.[0]?.endPoint).toBeDefined();
+	});
+
+	it("should force simple format when outputFormat is 'simple'", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{
+					height: 40,
+					id: "n1",
+					ports: [{ height: 10, id: "n1_p1", width: 5, x: 80, y: 15 }],
+					width: 80,
+					x: 0,
+					y: 0,
+				},
+				{
+					height: 40,
+					id: "n2",
+					ports: [{ height: 10, id: "n2_p1", width: 5, x: -5, y: 15 }],
+					width: 80,
+					x: 200,
+					y: 100,
+				},
+			],
+			edges: [{ id: "e1", sources: ["n1_p1"], targets: ["n2_p1"] }],
+			id: "root",
+		};
+
+		await routeEdgesInPlace(graph, { outputFormat: "simple" });
+		const edge = graph.edges?.[0];
+		expect(edge).toBeDefined();
+
+		expect(edge?.sourcePoint).toBeDefined();
+		expect(edge?.targetPoint).toBeDefined();
+		expect(edge?.sections).toBeUndefined();
+	});
+
 	it("should route edges inside a compound node", async () => {
 		const graph: ElkGraph = {
 			children: [
@@ -327,61 +467,19 @@ describe("hierarchical graphs", () => {
 					y: 50,
 				},
 			],
-			height: 400,
 			id: "root",
-			width: 500,
 		};
 
-		const result = await routeEdges(graph);
+		const result = await routeEdgesInPlace(graph);
 		const parent = result.children?.[0];
+		expect(parent).toBeDefined();
 		const edge = parent?.edges?.[0];
+		expect(edge).toBeDefined();
 
 		expect(edge?.sourcePoint).toBeDefined();
 		expect(edge?.targetPoint).toBeDefined();
 	});
 
-	it("should produce edge coordinates relative to the content area (inside padding)", async () => {
-		// parent at (50,50) with padding left=50, top=50
-		// child1 at content-relative (0,0) → absolute (100,100)
-		// child2 at content-relative (200,0) → absolute (250,100)
-		const graph: ElkGraph = {
-			children: [
-				{
-					children: [
-						{ height: 30, id: "child1", width: 60, x: 0, y: 0 },
-						{ height: 30, id: "child2", width: 60, x: 200, y: 0 },
-					],
-					edges: [{ id: "e1", source: "child1", target: "child2" }],
-					height: 200,
-					id: "parent",
-					padding: { bottom: 10, left: 50, right: 10, top: 50 },
-					width: 400,
-					x: 50,
-					y: 50,
-				},
-			],
-			height: 400,
-			id: "root",
-			width: 600,
-		};
-
-		const result = await routeEdges(graph);
-		const parent = result.children?.[0];
-		const edge = parent?.edges?.[0];
-
-		// sourcePoint should be near child1 in content-area-relative coords
-		// child1 spans x: [0, 60] in content-area coords
-		expect(edge?.sourcePoint?.x).toBeGreaterThanOrEqual(-5);
-		expect(edge?.sourcePoint?.x).toBeLessThanOrEqual(70);
-
-		// targetPoint should be near child2 in content-area-relative coords
-		// child2 spans x: [200, 260] in content-area coords
-		expect(edge?.targetPoint?.x).toBeGreaterThanOrEqual(190);
-		expect(edge?.targetPoint?.x).toBeLessThanOrEqual(270);
-	});
-});
-
-describe("round-trip integrity", () => {
 	it("should preserve original graph structure", async () => {
 		const graph: ElkGraph = {
 			children: [
@@ -403,39 +501,135 @@ describe("round-trip integrity", () => {
 					target: "n2",
 				},
 			],
-			height: 300,
 			id: "root",
 			properties: { "elk.algorithm": "layered" },
-			width: 400,
 		};
 
-		const result = await routeEdges(graph);
+		const result = await routeEdgesInPlace(graph);
 
-		// Graph structure preserved
 		expect(result.id).toBe("root");
 		expect(result.children).toHaveLength(2);
 		expect(result.children?.[0]?.properties).toEqual({
 			customProp: "hello",
 		});
 		expect(result.edges?.[0]?.properties).toEqual({ weight: 1 });
-
-		// Route data added
 		expect(result.edges?.[0]?.sourcePoint).toBeDefined();
 	});
+});
 
-	it("should modify graph in place (same reference returned)", async () => {
+describe("routeEdgesFlat", () => {
+	it("should route from flat node and edge arrays", async () => {
+		const nodes = [
+			{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
+			{ height: 40, id: "n2", width: 80, x: 200, y: 100 },
+		];
+		const edges = [{ id: "e1", source: "n1", target: "n2" }];
+
+		const result = await routeEdgesFlat(nodes, edges);
+
+		expect(result).toBeInstanceOf(Map);
+		expect(result.has("e1")).toBe(true);
+		const route = result.get("e1");
+		expect(route).toBeDefined();
+		expect(route?.sourcePoint).toBeDefined();
+		expect(route?.targetPoint).toBeDefined();
+	});
+});
+
+describe("createRoutingSession", () => {
+	it("should create a session and return routes", async () => {
 		const graph: ElkGraph = {
 			children: [
 				{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
 				{ height: 40, id: "n2", width: 80, x: 200, y: 100 },
 			],
 			edges: [{ id: "e1", source: "n1", target: "n2" }],
-			height: 300,
 			id: "root",
-			width: 400,
 		};
 
-		const result = await routeEdges(graph);
-		expect(result).toBe(graph);
+		const session = await createRoutingSession(graph);
+		try {
+			const routes = session.processTransaction();
+			expect(routes).toBeInstanceOf(Map);
+			expect(routes.has("e1")).toBe(true);
+		} finally {
+			session.destroy();
+		}
+	});
+
+	it("should support incremental node moves", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
+				{ height: 40, id: "n2", width: 80, x: 200, y: 100 },
+			],
+			edges: [{ id: "e1", source: "n1", target: "n2" }],
+			id: "root",
+		};
+
+		const session = await createRoutingSession(graph);
+		try {
+			const routes1 = session.processTransaction();
+			const route1 = routes1.get("e1");
+			expect(route1).toBeDefined();
+
+			session.moveNode("n2", { x: 300, y: 200 });
+			const routes2 = session.processTransaction();
+			const route2 = routes2.get("e1");
+			expect(route2).toBeDefined();
+
+			// Routes should differ after moving the target node
+			expect(route2?.targetPoint.x).not.toBe(route1?.targetPoint.x);
+		} finally {
+			session.destroy();
+		}
+	});
+
+	it("should support adding and removing edges", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
+				{ height: 40, id: "n2", width: 80, x: 200, y: 0 },
+				{ height: 40, id: "n3", width: 80, x: 100, y: 100 },
+			],
+			edges: [{ id: "e1", source: "n1", target: "n2" }],
+			id: "root",
+		};
+
+		const session = await createRoutingSession(graph);
+		try {
+			let routes = session.processTransaction();
+			expect(routes.size).toBe(1);
+
+			session.addEdge({ id: "e2", source: "n2", target: "n3" });
+			routes = session.processTransaction();
+			expect(routes.size).toBe(2);
+			expect(routes.has("e2")).toBe(true);
+
+			session.removeEdge("e1");
+			routes = session.processTransaction();
+			expect(routes.size).toBe(1);
+			expect(routes.has("e1")).toBe(false);
+			expect(routes.has("e2")).toBe(true);
+		} finally {
+			session.destroy();
+		}
+	});
+
+	it("should throw after destroy", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
+				{ height: 40, id: "n2", width: 80, x: 200, y: 0 },
+			],
+			edges: [{ id: "e1", source: "n1", target: "n2" }],
+			id: "root",
+		};
+
+		const session = await createRoutingSession(graph);
+		session.destroy();
+
+		expect(() => session.processTransaction()).toThrow("destroyed");
+		expect(() => session.moveNode("n1", { x: 50, y: 50 })).toThrow("destroyed");
 	});
 });

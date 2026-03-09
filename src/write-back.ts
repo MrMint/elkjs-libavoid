@@ -1,5 +1,5 @@
 import type { ParsedGraph } from "./parser";
-import type { ElkEdge, ElkPoint } from "./types";
+import type { ElkEdge, ElkPoint, OutputFormat } from "./types";
 
 /**
  * Detect whether the graph uses extended edge format (sources/targets with sections)
@@ -10,6 +10,47 @@ function usesExtendedFormat(edge: ElkEdge): boolean {
 		(edge.sources !== undefined && edge.sources.length > 0) ||
 		(edge.targets !== undefined && edge.targets.length > 0)
 	);
+}
+
+/**
+ * Determine whether to write in extended format based on outputFormat option and edge.
+ */
+function shouldUseExtendedFormat(
+	edge: ElkEdge,
+	outputFormat: OutputFormat,
+): boolean {
+	if (outputFormat === "extended") return true;
+	if (outputFormat === "simple") return false;
+	return usesExtendedFormat(edge);
+}
+
+function writeSimpleFormat(elkEdge: ElkEdge, points: ElkPoint[]): void {
+	elkEdge.sourcePoint = points[0];
+	elkEdge.targetPoint = points[points.length - 1];
+	if (points.length > 2) {
+		elkEdge.bendPoints = points.slice(1, -1);
+	}
+	// Clean up extended format fields if forcing simple
+	delete elkEdge.sections;
+}
+
+function writeExtendedFormat(
+	elkEdge: ElkEdge,
+	points: ElkPoint[],
+	edgeId: string,
+): void {
+	elkEdge.sections = [
+		{
+			bendPoints: points.length > 2 ? points.slice(1, -1) : undefined,
+			endPoint: points[points.length - 1],
+			id: `${edgeId}_s0`,
+			startPoint: points[0],
+		},
+	];
+	// Clean up simple format fields if forcing extended
+	delete elkEdge.sourcePoint;
+	delete elkEdge.targetPoint;
+	delete elkEdge.bendPoints;
 }
 
 /**
@@ -42,10 +83,12 @@ function toRelativeCoords(
  * Write computed routes back into the ELK graph's edge objects.
  *
  * Modifies the graph in place. Supports both extended and simple edge formats.
+ * The outputFormat option can force a specific format regardless of input.
  */
 export function writeRoutesToGraph(
 	routes: Map<string, ElkPoint[]>,
 	parsed: ParsedGraph,
+	outputFormat: OutputFormat = "auto",
 ): void {
 	for (const edge of parsed.edges) {
 		const absolutePoints = routes.get(edge.id);
@@ -54,23 +97,10 @@ export function writeRoutesToGraph(
 		const points = toRelativeCoords(absolutePoints, edge.ownerNodeId, parsed);
 		const elkEdge = edge.elkEdgeRef;
 
-		if (usesExtendedFormat(elkEdge)) {
-			// Extended format: write sections
-			elkEdge.sections = [
-				{
-					bendPoints: points.length > 2 ? points.slice(1, -1) : undefined,
-					endPoint: points[points.length - 1],
-					id: `${edge.id}_s0`,
-					startPoint: points[0],
-				},
-			];
+		if (shouldUseExtendedFormat(elkEdge, outputFormat)) {
+			writeExtendedFormat(elkEdge, points, edge.id);
 		} else {
-			// Simple format: sourcePoint/targetPoint/bendPoints
-			elkEdge.sourcePoint = points[0];
-			elkEdge.targetPoint = points[points.length - 1];
-			if (points.length > 2) {
-				elkEdge.bendPoints = points.slice(1, -1);
-			}
+			writeSimpleFormat(elkEdge, points);
 		}
 	}
 }

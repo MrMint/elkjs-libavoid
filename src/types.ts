@@ -59,6 +59,40 @@ export interface ElkNode {
 
 export interface ElkGraph extends ElkNode {}
 
+/** Cardinal direction for edge connection sides */
+export type ConnectionSide = "north" | "south" | "east" | "west";
+
+/** Route result for a single edge */
+export interface RouteResult {
+	sourcePoint: ElkPoint;
+	targetPoint: ElkPoint;
+	bendPoints: ElkPoint[];
+	sourceSide: ConnectionSide;
+	targetSide: ConnectionSide;
+}
+
+/** Input node for the flat-list convenience API */
+export interface RouteNode {
+	id: string;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+/** Input edge for the flat-list convenience API */
+export interface RouteEdge {
+	id: string;
+	source: string;
+	target: string;
+}
+
+/** Self-loop handling strategy */
+export type SelfLoopHandling = "skip" | "fallback";
+
+/** Output format for routeEdgesInPlace */
+export type OutputFormat = "simple" | "extended" | "auto";
+
 /** Routing configuration options */
 export interface LibavoidRoutingOptions {
 	/** Routing style. Default: 'orthogonal' */
@@ -89,4 +123,13 @@ export interface LibavoidRoutingOptions {
 	nudgeOrthogonalTouchingColinearSegments?: boolean;
 	performUnifyingNudgingPreprocessingStep?: boolean;
 	nudgeSharedPathsWithCommonEndPoint?: boolean;
+
+	/** Only route edges with these IDs. Others are left unchanged. */
+	edgeIds?: string[];
+
+	/** How to handle self-loop edges (source === target). Default: 'skip' */
+	selfLoopHandling?: SelfLoopHandling;
+
+	/** Output format for routeEdgesInPlace. Default: 'auto' (matches input format). */
+	outputFormat?: OutputFormat;
 }

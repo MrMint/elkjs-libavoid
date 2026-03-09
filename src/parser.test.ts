@@ -498,6 +498,19 @@ describe("parseElkGraph", () => {
 	});
 
 	describe("edge cases", () => {
+		it("should accept root node without width/height", () => {
+			const graph: ElkGraph = {
+				children: [{ height: 40, id: "n1", width: 80, x: 0, y: 0 }],
+				id: "root",
+			};
+
+			const parsed = parseElkGraph(graph);
+			const root = parsed.nodes.get("root");
+			expect(root).toBeDefined();
+			expect(root?.width).toBe(0);
+			expect(root?.height).toBe(0);
+		});
+
 		it("should handle graph with no edges", () => {
 			const graph: ElkGraph = {
 				children: [{ height: 40, id: "n1", width: 80, x: 0, y: 0 }],

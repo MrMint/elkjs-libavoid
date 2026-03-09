@@ -31,7 +31,6 @@
 		"dev": "tsdown --watch",
 		"format": "biome format --write",
 		"lint": "biome ci && tsc --noEmit",
-		"postbuild": "cp node_modules/libavoid-js/dist/libavoid.wasm dist/",
 		"release": "changeset publish",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage",
@@ -53,6 +52,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "2.4.6",
 		"@changesets/cli": "2.30.0",
+		"@types/node": "^25.4.0",
 		"elkjs": "0.11.1",
 		"tsdown": "0.21.1",
 		"typescript": "5.9.3",

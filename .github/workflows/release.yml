@@ -31,8 +31,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish prerelease if unpublished changesets remain
-        if: steps.changesets.outputs.published != 'true'
-        run: |
-          npx changeset version --snapshot next
-          npx changeset publish --tag next

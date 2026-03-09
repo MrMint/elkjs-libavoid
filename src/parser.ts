@@ -129,12 +129,16 @@ function validateNode(
 	parentId: string | null,
 ): { width: number; height: number } {
 	const { width, height } = node;
+	if (parentId === null) {
+		// Root node — dimensions not required (not used as obstacle)
+		return { height: height ?? 0, width: width ?? 0 };
+	}
 	if (width === undefined || height === undefined) {
 		throw new Error(
 			`Node "${node.id}" is missing width or height. All nodes must have dimensions.`,
 		);
 	}
-	if (parentId !== null && (node.x === undefined || node.y === undefined)) {
+	if (node.x === undefined || node.y === undefined) {
 		throw new Error(
 			`Node "${node.id}" is missing x or y position. All non-root nodes must be positioned.`,
 		);
