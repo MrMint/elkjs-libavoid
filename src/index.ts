@@ -13,4 +13,3 @@ export type {
 	RouteResult,
 	SelfLoopHandling,
 } from "./types";
-export { getWasmPath } from "./wasm-path";

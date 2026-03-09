@@ -9,7 +9,7 @@ export default defineConfig({
 		},
 	],
 	dts: true,
-	entry: ["src/index.ts"],
+	entry: ["src/index.ts", "src/node.ts"],
 	format: ["es", "cjs"],
 	sourcemap: true,
 });

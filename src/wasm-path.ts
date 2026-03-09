@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
 /**
  * Get the absolute file path to the libavoid WASM binary.
@@ -10,12 +11,13 @@ import { createRequire } from "node:module";
  *
  * @example
  * ```ts
- * import { getWasmPath } from "@mr_mint/elkjs-libavoid";
+ * import { getWasmPath } from "@mr_mint/elkjs-libavoid/node";
  * console.log(getWasmPath());
  * // "/path/to/node_modules/libavoid-js/dist/libavoid.wasm"
  * ```
  */
 export function getWasmPath(): string {
 	const require = createRequire(import.meta.url);
-	return require.resolve("libavoid-js/dist/libavoid.wasm");
+	const entryPath = require.resolve("libavoid-js");
+	return join(dirname(entryPath), "libavoid.wasm");
 }
