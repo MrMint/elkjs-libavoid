@@ -1,6 +1,6 @@
 {
 	"name": "@mr_mint/elkjs-libavoid",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"description": "Obstacle-avoiding edge routing for ELK JSON graphs using libavoid",
 	"type": "module",
 	"main": "./dist/index.cjs",
