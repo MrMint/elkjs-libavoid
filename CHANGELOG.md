@@ -1,5 +1,13 @@
 # @mr_mint/elkjs-libavoid
 
+## 0.3.0
+
+### Minor Changes
+
+- 6310054: Move `getWasmPath()` from the main entry to a Node-only subpath export (`@mr_mint/elkjs-libavoid/node`). This prevents bundlers from statically analyzing `node:module` and `createRequire` in browser builds. Also fix `getWasmPath()` to resolve `"libavoid-js"` (an exported subpath) instead of `"libavoid-js/dist/libavoid.wasm"` (unexported), which broke in ESM strict mode and Turbopack.
+- b884fa9: Remove `routeEdgesFlat()`, `RouteNode`, `RouteEdge`, `OutputFormat`, and `outputFormat` option. Output format is now always auto-detected from the edge format. Use `routeEdges()` with a graph directly instead of `routeEdgesFlat()`.
+- b884fa9: Split `LibavoidRoutingOptions` into `LibavoidRouterOptions` (router config) and `LibavoidRoutingOptions` (adds `edgeIds`/`selfLoopHandling`). `createRoutingSession()` now accepts the narrower `LibavoidRouterOptions`.
+
 ## 0.2.0
 
 ### Minor Changes
