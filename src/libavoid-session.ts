@@ -1,6 +1,6 @@
 import type { Avoid } from "libavoid-js";
 import type { ParsedGraph, ResolvedNode, ResolvedPort } from "./parser";
-import type { ElkPoint, LibavoidRoutingOptions } from "./types";
+import type { ElkPoint, LibavoidRouterOptions } from "./types";
 
 /** Extract WASM types from the Avoid interface (not directly exported by libavoid-js) */
 type WasmRouter = Avoid["Router"];
@@ -55,10 +55,10 @@ function portSideToConnDir(side: string): number {
 function applyRoutingParameters(
 	router: WasmRouter,
 	Avoid: Avoid,
-	options: LibavoidRoutingOptions,
+	options: LibavoidRouterOptions,
 ): void {
 	const RP = Avoid.RoutingParameter;
-	const paramMap: [keyof LibavoidRoutingOptions, WasmRoutingParam][] = [
+	const paramMap: [keyof LibavoidRouterOptions, WasmRoutingParam][] = [
 		["segmentPenalty", RP.segmentPenalty],
 		["anglePenalty", RP.anglePenalty],
 		["crossingPenalty", RP.crossingPenalty],
@@ -78,7 +78,7 @@ function applyRoutingParameters(
 	}
 
 	const RO = Avoid.RoutingOption;
-	const optionMap: [keyof LibavoidRoutingOptions, WasmRoutingOpt][] = [
+	const optionMap: [keyof LibavoidRouterOptions, WasmRoutingOpt][] = [
 		[
 			"nudgeOrthogonalSegmentsConnectedToShapes",
 			RO.nudgeOrthogonalSegmentsConnectedToShapes,
@@ -254,7 +254,7 @@ function registerEdgeConnectors(
 export function createLibavoidSession(
 	parsed: ParsedGraph,
 	Avoid: Avoid,
-	options: LibavoidRoutingOptions = {},
+	options: LibavoidRouterOptions = {},
 ): LibavoidSession {
 	const routingType = options.routingType ?? "orthogonal";
 	const routerFlag =

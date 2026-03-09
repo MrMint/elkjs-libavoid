@@ -6,13 +6,12 @@ import {
 } from "./libavoid-session";
 import type { ParsedGraph, ResolvedEdge } from "./parser";
 import { parseElkGraph } from "./parser";
+import { buildRouteResults } from "./route-result";
 import type {
 	ConnectionSide,
 	ElkGraph,
 	ElkPoint,
 	LibavoidRoutingOptions,
-	RouteEdge,
-	RouteNode,
 	RouteResult,
 } from "./types";
 import { writeRoutesToGraph } from "./write-back";
@@ -57,53 +56,6 @@ function wrapBrowserWasmError(err: unknown): Error {
 		);
 	}
 	return err instanceof Error ? err : new Error(String(err));
-}
-
-/**
- * Infer the connection side from the direction of the first or last edge segment.
- */
-function inferSide(
-	from: ElkPoint,
-	to: ElkPoint,
-	isTarget: boolean,
-): ConnectionSide {
-	const dx = to.x - from.x;
-	const dy = to.y - from.y;
-
-	if (Math.abs(dx) >= Math.abs(dy)) {
-		if (isTarget) return dx > 0 ? "west" : "east";
-		return dx > 0 ? "east" : "west";
-	}
-	if (isTarget) return dy > 0 ? "north" : "south";
-	return dy > 0 ? "south" : "north";
-}
-
-/**
- * Convert raw point arrays from extractRoutes into RouteResult objects.
- */
-function buildRouteResults(
-	rawRoutes: Map<string, ElkPoint[]>,
-): Map<string, RouteResult> {
-	const results = new Map<string, RouteResult>();
-	for (const [edgeId, points] of rawRoutes) {
-		if (points.length < 2) continue;
-
-		const sourceSide = inferSide(points[0], points[1], false);
-		const targetSide = inferSide(
-			points[points.length - 2],
-			points[points.length - 1],
-			true,
-		);
-
-		results.set(edgeId, {
-			bendPoints: points.length > 2 ? points.slice(1, -1) : [],
-			sourcePoint: points[0],
-			sourceSide,
-			targetPoint: points[points.length - 1],
-			targetSide,
-		});
-	}
-	return results;
 }
 
 /**
@@ -290,7 +242,7 @@ export async function routeEdgesInPlace(
 		try {
 			session.router.processTransaction();
 			const rawRoutes = extractRoutes(session);
-			writeRoutesToGraph(rawRoutes, parsed, options?.outputFormat);
+			writeRoutesToGraph(rawRoutes, parsed);
 		} finally {
 			destroySession(session);
 		}
@@ -308,41 +260,12 @@ export async function routeEdgesInPlace(
 				node.height,
 				options?.shapeBufferDistance ?? 4,
 			);
-			writeRoutesToGraph(
-				new Map([[edge.id, loop.points]]),
-				{ ...parsed, edges: [edge] },
-				options?.outputFormat,
-			);
+			writeRoutesToGraph(new Map([[edge.id, loop.points]]), {
+				...parsed,
+				edges: [edge],
+			});
 		}
 	}
 
 	return graph;
-}
-
-/**
- * Route edges from flat node and edge arrays (convenience API for non-ELK consumers).
- *
- * Builds a synthetic ELK graph internally and returns a route map.
- */
-export async function routeEdgesFlat(
-	nodes: RouteNode[],
-	edges: RouteEdge[],
-	options?: LibavoidRoutingOptions,
-): Promise<Map<string, RouteResult>> {
-	const graph: ElkGraph = {
-		children: nodes.map((n) => ({
-			height: n.height,
-			id: n.id,
-			width: n.width,
-			x: n.x,
-			y: n.y,
-		})),
-		edges: edges.map((e) => ({
-			id: e.id,
-			source: e.source,
-			target: e.target,
-		})),
-		id: "__root",
-	};
-	return routeEdges(graph, options);
 }

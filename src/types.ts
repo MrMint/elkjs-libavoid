@@ -71,30 +71,11 @@ export interface RouteResult {
 	targetSide: ConnectionSide;
 }
 
-/** Input node for the flat-list convenience API */
-export interface RouteNode {
-	id: string;
-	x: number;
-	y: number;
-	width: number;
-	height: number;
-}
-
-/** Input edge for the flat-list convenience API */
-export interface RouteEdge {
-	id: string;
-	source: string;
-	target: string;
-}
-
 /** Self-loop handling strategy */
 export type SelfLoopHandling = "skip" | "fallback";
 
-/** Output format for routeEdgesInPlace */
-export type OutputFormat = "simple" | "extended" | "auto";
-
-/** Routing configuration options */
-export interface LibavoidRoutingOptions {
+/** Router configuration: penalties, distances, and nudging behavior. */
+export interface LibavoidRouterOptions {
 	/** Routing style. Default: 'orthogonal' */
 	routingType?: "orthogonal" | "polyline";
 
@@ -123,13 +104,13 @@ export interface LibavoidRoutingOptions {
 	nudgeOrthogonalTouchingColinearSegments?: boolean;
 	performUnifyingNudgingPreprocessingStep?: boolean;
 	nudgeSharedPathsWithCommonEndPoint?: boolean;
+}
 
+/** Options for one-shot routing (routeEdges / routeEdgesInPlace). */
+export interface LibavoidRoutingOptions extends LibavoidRouterOptions {
 	/** Only route edges with these IDs. Others are left unchanged. */
 	edgeIds?: string[];
 
 	/** How to handle self-loop edges (source === target). Default: 'skip' */
 	selfLoopHandling?: SelfLoopHandling;
-
-	/** Output format for routeEdgesInPlace. Default: 'auto' (matches input format). */
-	outputFormat?: OutputFormat;
 }

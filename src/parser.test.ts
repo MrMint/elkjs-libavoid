@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseElkGraph } from "./parser";
-import type { ElkGraph } from "./types";
+import type { ElkEdge, ElkGraph, ElkNode } from "./types";
 
 describe("parseElkGraph", () => {
 	describe("flat graph parsing", () => {
@@ -344,7 +344,7 @@ describe("parseElkGraph", () => {
 	describe("error cases", () => {
 		it("should throw for node missing width/height", () => {
 			const graph: ElkGraph = {
-				children: [{ id: "n1", x: 0, y: 0 } as any],
+				children: [{ id: "n1", x: 0, y: 0 } as ElkNode],
 				height: 300,
 				id: "root",
 				width: 400,
@@ -423,7 +423,7 @@ describe("parseElkGraph", () => {
 		it("should throw for edge with no source/target", () => {
 			const graph: ElkGraph = {
 				children: [{ height: 40, id: "n1", width: 80, x: 0, y: 0 }],
-				edges: [{ id: "e1" } as any],
+				edges: [{ id: "e1" } as ElkEdge],
 				height: 300,
 				id: "root",
 				width: 400,

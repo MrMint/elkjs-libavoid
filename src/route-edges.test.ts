@@ -1,12 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import type { ElkGraph } from ".";
-import {
-	createRoutingSession,
-	init,
-	routeEdges,
-	routeEdgesFlat,
-	routeEdgesInPlace,
-} from ".";
+import { createRoutingSession, init, routeEdges, routeEdgesInPlace } from ".";
 
 beforeAll(async () => {
 	await init();
@@ -417,39 +411,6 @@ describe("routeEdgesInPlace", () => {
 		expect(edge?.sections?.[0]?.endPoint).toBeDefined();
 	});
 
-	it("should force simple format when outputFormat is 'simple'", async () => {
-		const graph: ElkGraph = {
-			children: [
-				{
-					height: 40,
-					id: "n1",
-					ports: [{ height: 10, id: "n1_p1", width: 5, x: 80, y: 15 }],
-					width: 80,
-					x: 0,
-					y: 0,
-				},
-				{
-					height: 40,
-					id: "n2",
-					ports: [{ height: 10, id: "n2_p1", width: 5, x: -5, y: 15 }],
-					width: 80,
-					x: 200,
-					y: 100,
-				},
-			],
-			edges: [{ id: "e1", sources: ["n1_p1"], targets: ["n2_p1"] }],
-			id: "root",
-		};
-
-		await routeEdgesInPlace(graph, { outputFormat: "simple" });
-		const edge = graph.edges?.[0];
-		expect(edge).toBeDefined();
-
-		expect(edge?.sourcePoint).toBeDefined();
-		expect(edge?.targetPoint).toBeDefined();
-		expect(edge?.sections).toBeUndefined();
-	});
-
 	it("should route edges inside a compound node", async () => {
 		const graph: ElkGraph = {
 			children: [
@@ -514,25 +475,6 @@ describe("routeEdgesInPlace", () => {
 		});
 		expect(result.edges?.[0]?.properties).toEqual({ weight: 1 });
 		expect(result.edges?.[0]?.sourcePoint).toBeDefined();
-	});
-});
-
-describe("routeEdgesFlat", () => {
-	it("should route from flat node and edge arrays", async () => {
-		const nodes = [
-			{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
-			{ height: 40, id: "n2", width: 80, x: 200, y: 100 },
-		];
-		const edges = [{ id: "e1", source: "n1", target: "n2" }];
-
-		const result = await routeEdgesFlat(nodes, edges);
-
-		expect(result).toBeInstanceOf(Map);
-		expect(result.has("e1")).toBe(true);
-		const route = result.get("e1");
-		expect(route).toBeDefined();
-		expect(route?.sourcePoint).toBeDefined();
-		expect(route?.targetPoint).toBeDefined();
 	});
 });
 

@@ -1,9 +1,4 @@
-export {
-	init,
-	routeEdges,
-	routeEdgesFlat,
-	routeEdgesInPlace,
-} from "./route-edges";
+export { init, routeEdges, routeEdgesInPlace } from "./route-edges";
 export { createRoutingSession, RoutingSession } from "./session";
 export type {
 	ConnectionSide,
@@ -13,10 +8,8 @@ export type {
 	ElkNode,
 	ElkPoint,
 	ElkPort,
+	LibavoidRouterOptions,
 	LibavoidRoutingOptions,
-	OutputFormat,
-	RouteEdge,
-	RouteNode,
 	RouteResult,
 	SelfLoopHandling,
 } from "./types";

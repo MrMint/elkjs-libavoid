@@ -1,27 +1,15 @@
 import type { ParsedGraph } from "./parser";
-import type { ElkEdge, ElkPoint, OutputFormat } from "./types";
+import type { ElkEdge, ElkPoint } from "./types";
 
 /**
- * Detect whether the graph uses extended edge format (sources/targets with sections)
+ * Detect whether the edge uses extended format (sources/targets with sections)
  * or simple format (source/target with sourcePoint/targetPoint/bendPoints).
  */
-function usesExtendedFormat(edge: ElkEdge): boolean {
+function isExtendedFormat(edge: ElkEdge): boolean {
 	return (
 		(edge.sources !== undefined && edge.sources.length > 0) ||
 		(edge.targets !== undefined && edge.targets.length > 0)
 	);
-}
-
-/**
- * Determine whether to write in extended format based on outputFormat option and edge.
- */
-function shouldUseExtendedFormat(
-	edge: ElkEdge,
-	outputFormat: OutputFormat,
-): boolean {
-	if (outputFormat === "extended") return true;
-	if (outputFormat === "simple") return false;
-	return usesExtendedFormat(edge);
 }
 
 function writeSimpleFormat(elkEdge: ElkEdge, points: ElkPoint[]): void {
@@ -82,13 +70,13 @@ function toRelativeCoords(
 /**
  * Write computed routes back into the ELK graph's edge objects.
  *
- * Modifies the graph in place. Supports both extended and simple edge formats.
- * The outputFormat option can force a specific format regardless of input.
+ * Modifies the graph in place. Auto-detects whether each edge uses
+ * extended format (sources/targets/sections) or simple format
+ * (source/target/sourcePoint/targetPoint/bendPoints) and writes accordingly.
  */
 export function writeRoutesToGraph(
 	routes: Map<string, ElkPoint[]>,
 	parsed: ParsedGraph,
-	outputFormat: OutputFormat = "auto",
 ): void {
 	for (const edge of parsed.edges) {
 		const absolutePoints = routes.get(edge.id);
@@ -97,7 +85,7 @@ export function writeRoutesToGraph(
 		const points = toRelativeCoords(absolutePoints, edge.ownerNodeId, parsed);
 		const elkEdge = edge.elkEdgeRef;
 
-		if (shouldUseExtendedFormat(elkEdge, outputFormat)) {
+		if (isExtendedFormat(elkEdge)) {
 			writeExtendedFormat(elkEdge, points, edge.id);
 		} else {
 			writeSimpleFormat(elkEdge, points);
