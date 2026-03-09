@@ -1,0 +1,79 @@
+{
+	"name": "@mr_mint/elkjs-libavoid",
+	"version": "0.0.0",
+	"description": "Obstacle-avoiding edge routing for ELK JSON graphs using libavoid",
+	"type": "module",
+	"main": "./dist/index.cjs",
+	"module": "./dist/index.mjs",
+	"types": "./dist/index.d.mts",
+	"exports": {
+		".": {
+			"import": {
+				"types": "./dist/index.d.mts",
+				"default": "./dist/index.mjs"
+			},
+			"require": {
+				"types": "./dist/index.d.cts",
+				"default": "./dist/index.cjs"
+			}
+		}
+	},
+	"files": [
+		"dist/",
+		"README.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"build": "tsdown",
+		"changeset": "changeset",
+		"check": "biome check",
+		"check:fix": "biome check --write",
+		"dev": "tsdown --watch",
+		"format": "biome format --write",
+		"lint": "biome ci && tsc --noEmit",
+		"postbuild": "cp node_modules/libavoid-js/dist/libavoid.wasm dist/",
+		"release": "changeset publish",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage",
+		"test:watch": "vitest",
+		"typecheck": "tsc --noEmit",
+		"version": "changeset version"
+	},
+	"dependencies": {
+		"libavoid-js": "0.5.0-beta.5"
+	},
+	"peerDependencies": {
+		"elkjs": ">=0.8.0"
+	},
+	"peerDependenciesMeta": {
+		"elkjs": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.4.6",
+		"@changesets/cli": "2.30.0",
+		"elkjs": "0.11.1",
+		"tsdown": "0.21.1",
+		"typescript": "5.9.3",
+		"vitest": "4.0.18"
+	},
+	"keywords": [
+		"elk",
+		"elkjs",
+		"libavoid",
+		"graph",
+		"layout",
+		"edge-routing",
+		"connector-routing",
+		"obstacle-avoiding"
+	],
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/mrmint/elkjs-libavoid.git"
+	},
+	"engines": {
+		"node": ">=20"
+	}
+}
