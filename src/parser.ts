@@ -15,6 +15,8 @@ export interface ResolvedNode {
 	height: number;
 	ports: ResolvedPort[];
 	parentId: string | null;
+	/** Whether this node has children (is a container/group node) */
+	hasChildren: boolean;
 	padding: { top: number; right: number; bottom: number; left: number };
 }
 
@@ -264,6 +266,7 @@ export function parseElkGraph(graph: ElkGraph): ParsedGraph {
 		};
 
 		nodes.set(node.id, {
+			hasChildren: (node.children?.length ?? 0) > 0,
 			height,
 			id: node.id,
 			padding,

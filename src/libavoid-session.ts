@@ -33,6 +33,9 @@ interface ConnectorEntry {
 export interface LibavoidSession {
 	avoid: Avoid;
 	connectors: Map<string, ConnectorEntry>;
+	edgeEndpointNodes: Set<string>;
+	nodes: Map<string, ResolvedNode>;
+	portPinClassIds: Map<string, number>;
 	router: WasmRouter;
 	shapes: Map<string, ShapeEntry>;
 }
@@ -110,6 +113,7 @@ function registerNodeShapes(
 	Avoid: Avoid,
 	router: WasmRouter,
 	nodesNeedingCenterPin: Set<string>,
+	edgeEndpointNodes: Set<string>,
 ): {
 	portPinClassIds: Map<string, number>;
 	shapes: Map<string, ShapeEntry>;
@@ -120,6 +124,12 @@ function registerNodeShapes(
 
 	for (const [nodeId, node] of parsed.nodes) {
 		if (node.parentId === null) continue;
+		// Container nodes (with children) that are not edge endpoints are skipped —
+		// edges can route through them freely. Ideally these would be ClusterRef
+		// (soft boundaries with clusterCrossingPenalty), but ClusterRef is not
+		// exposed in the libavoid-js WASM bindings. Container nodes that ARE
+		// edge endpoints still need a ShapeRef for connector attachment.
+		if (node.hasChildren && !edgeEndpointNodes.has(nodeId)) continue;
 
 		const topLeft = new Avoid.Point(node.x, node.y);
 		const bottomRight = new Avoid.Point(
@@ -266,7 +276,10 @@ export function createLibavoidSession(
 	applyRoutingParameters(router, Avoid, options);
 
 	const nodesNeedingCenterPin = new Set<string>();
+	const edgeEndpointNodes = new Set<string>();
 	for (const edge of parsed.edges) {
+		edgeEndpointNodes.add(edge.sourceNodeId);
+		edgeEndpointNodes.add(edge.targetNodeId);
 		if (!edge.sourcePortId) nodesNeedingCenterPin.add(edge.sourceNodeId);
 		if (!edge.targetPortId) nodesNeedingCenterPin.add(edge.targetNodeId);
 	}
@@ -276,6 +289,7 @@ export function createLibavoidSession(
 		Avoid,
 		router,
 		nodesNeedingCenterPin,
+		edgeEndpointNodes,
 	);
 
 	const connectors = registerEdgeConnectors(
@@ -286,7 +300,15 @@ export function createLibavoidSession(
 		portPinClassIds,
 	);
 
-	return { avoid: Avoid, connectors, router, shapes };
+	return {
+		avoid: Avoid,
+		connectors,
+		edgeEndpointNodes,
+		nodes: parsed.nodes,
+		portPinClassIds,
+		router,
+		shapes,
+	};
 }
 
 /**

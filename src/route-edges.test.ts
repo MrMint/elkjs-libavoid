@@ -478,6 +478,146 @@ describe("routeEdgesInPlace", () => {
 	});
 });
 
+describe("container node handling", () => {
+	it("should route edges across container boundaries to reach children", async () => {
+		// Edge from leaf node outside a group to a child inside the group.
+		// The parent node should NOT block the edge.
+		const graph: ElkGraph = {
+			children: [
+				{ height: 40, id: "outside", width: 80, x: 0, y: 0 },
+				{
+					children: [{ height: 30, id: "inside", width: 60, x: 10, y: 10 }],
+					height: 100,
+					id: "group",
+					padding: { bottom: 5, left: 5, right: 5, top: 5 },
+					width: 150,
+					x: 200,
+					y: 0,
+				},
+			],
+			edges: [{ id: "e1", source: "outside", target: "inside" }],
+			id: "root",
+		};
+
+		const result = await routeEdges(graph);
+		const route = result.get("e1");
+		expect(route).toBeDefined();
+		if (!route) return;
+		expect(route.sourcePoint).toBeDefined();
+		expect(route.targetPoint).toBeDefined();
+		// Route should have at least 2 points (source and target)
+		expect(route.bendPoints.length + 2).toBeGreaterThanOrEqual(2);
+		// Target point should be near the "inside" child node (abs x: 200+5+10=215, y: 0+5+10=15)
+		expect(route.targetPoint.x).toBeGreaterThanOrEqual(215);
+		expect(route.targetPoint.x).toBeLessThanOrEqual(215 + 60);
+	});
+
+	it("should route edges between children of different groups", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{
+					children: [{ height: 30, id: "a_child", width: 60, x: 10, y: 10 }],
+					height: 100,
+					id: "groupA",
+					padding: { bottom: 5, left: 5, right: 5, top: 5 },
+					width: 150,
+					x: 0,
+					y: 0,
+				},
+				{
+					children: [{ height: 30, id: "b_child", width: 60, x: 10, y: 10 }],
+					height: 100,
+					id: "groupB",
+					padding: { bottom: 5, left: 5, right: 5, top: 5 },
+					width: 150,
+					x: 300,
+					y: 0,
+				},
+			],
+			edges: [{ id: "e1", source: "a_child", target: "b_child" }],
+			id: "root",
+		};
+
+		const result = await routeEdges(graph);
+		const route = result.get("e1");
+		expect(route).toBeDefined();
+		if (!route) return;
+		expect(route.sourcePoint).toBeDefined();
+		expect(route.targetPoint).toBeDefined();
+		// Source should originate from groupA area, target should reach groupB area
+		expect(route.sourcePoint.x).toBeLessThan(150);
+		expect(route.targetPoint.x).toBeGreaterThanOrEqual(300);
+	});
+
+	it("should route edges between container nodes", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{
+					children: [{ height: 30, id: "a_child", width: 60, x: 10, y: 10 }],
+					height: 100,
+					id: "groupA",
+					width: 150,
+					x: 0,
+					y: 0,
+				},
+				{
+					children: [{ height: 30, id: "b_child", width: 60, x: 10, y: 10 }],
+					height: 100,
+					id: "groupB",
+					width: 150,
+					x: 300,
+					y: 0,
+				},
+			],
+			edges: [{ id: "e1", source: "groupA", target: "groupB" }],
+			id: "root",
+		};
+
+		const result = await routeEdges(graph);
+		const route = result.get("e1");
+		expect(route).toBeDefined();
+		if (!route) return;
+		expect(route.sourcePoint).toBeDefined();
+		expect(route.targetPoint).toBeDefined();
+		// Source from groupA (x: 0..150), target at groupB (x: 300..450)
+		expect(route.sourcePoint.x).toBeLessThanOrEqual(150);
+		expect(route.targetPoint.x).toBeGreaterThanOrEqual(300);
+	});
+
+	it("should move children when a container node is moved", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{ height: 40, id: "outside", width: 80, x: 0, y: 0 },
+				{
+					children: [{ height: 30, id: "inside", width: 60, x: 10, y: 10 }],
+					height: 100,
+					id: "group",
+					padding: { bottom: 5, left: 5, right: 5, top: 5 },
+					width: 150,
+					x: 200,
+					y: 0,
+				},
+			],
+			edges: [{ id: "e1", source: "outside", target: "inside" }],
+			id: "root",
+		};
+
+		const session = await createRoutingSession(graph);
+		try {
+			// Moving the container should not throw, and should re-route successfully
+			session.moveNode("group", { x: 400, y: 0 });
+			const routes = session.processTransaction();
+			expect(routes.has("e1")).toBe(true);
+			const route = routes.get("e1");
+			if (!route) return;
+			// Target should have shifted rightward along with the group
+			expect(route.targetPoint.x).toBeGreaterThanOrEqual(400);
+		} finally {
+			session.destroy();
+		}
+	});
+});
+
 describe("createRoutingSession", () => {
 	it("should create a session and return routes", async () => {
 		const graph: ElkGraph = {

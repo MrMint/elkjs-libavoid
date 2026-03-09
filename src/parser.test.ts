@@ -307,6 +307,30 @@ describe("parseElkGraph", () => {
 			});
 		});
 
+		it("should set hasChildren for container nodes", () => {
+			const graph: ElkGraph = {
+				children: [
+					{
+						children: [{ height: 30, id: "child1", width: 60, x: 0, y: 0 }],
+						height: 200,
+						id: "parent",
+						width: 300,
+						x: 50,
+						y: 50,
+					},
+					{ height: 40, id: "leaf", width: 80, x: 400, y: 0 },
+				],
+				id: "root",
+			};
+
+			const parsed = parseElkGraph(graph);
+
+			expect(parsed.nodes.get("root")?.hasChildren).toBe(true);
+			expect(parsed.nodes.get("parent")?.hasChildren).toBe(true);
+			expect(parsed.nodes.get("child1")?.hasChildren).toBe(false);
+			expect(parsed.nodes.get("leaf")?.hasChildren).toBe(false);
+		});
+
 		it("should handle 3-level nesting", () => {
 			const graph: ElkGraph = {
 				children: [

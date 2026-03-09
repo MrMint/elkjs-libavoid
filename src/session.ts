@@ -26,47 +26,74 @@ export class RoutingSession {
 	private session: LibavoidSession;
 	private avoid: Avoid;
 	private destroyed = false;
-	private portPinClassIds: Map<string, number>;
 
 	/** @internal Use createRoutingSession() instead. */
-	constructor(
-		session: LibavoidSession,
-		avoid: Avoid,
-		portPinClassIds: Map<string, number>,
-	) {
+	constructor(session: LibavoidSession, avoid: Avoid) {
 		this.session = session;
 		this.avoid = avoid;
-		this.portPinClassIds = portPinClassIds;
 	}
 
 	/**
 	 * Move a node to a new position. The shape obstacle is updated in the router.
 	 * Call processTransaction() after all moves to re-route affected edges.
+	 *
+	 * Moving a container node also moves all descendant shapes by the same delta.
 	 */
 	moveNode(nodeId: string, position: { x: number; y: number }): void {
 		this.assertNotDestroyed();
+		const node = this.session.nodes.get(nodeId);
+		if (!node) {
+			throw new Error(`Node "${nodeId}" not found in session.`);
+		}
 		const shapeEntry = this.session.shapes.get(nodeId);
-		if (!shapeEntry) {
+		if (!shapeEntry && !node.hasChildren) {
 			throw new Error(
-				`Node "${nodeId}" not found in session. Only non-root nodes can be moved.`,
+				`Node "${nodeId}" not found in session. Only leaf (non-root, non-container) nodes can be moved.`,
 			);
 		}
 
-		const node = shapeEntry.node;
 		const dx = position.x - node.x;
 		const dy = position.y - node.y;
+		if (dx === 0 && dy === 0) return;
 
-		this.session.router.moveShape_delta(shapeEntry.shapeRef, dx, dy);
+		this.moveShapeAndTrack(nodeId, node, dx, dy);
 
-		// Update internal tracking
-		node.x = position.x;
-		node.y = position.y;
+		// Move all descendant shapes by the same delta
+		if (node.hasChildren) {
+			for (const [childId, childNode] of this.session.nodes) {
+				if (this.isDescendantOf(childId, nodeId)) {
+					this.moveShapeAndTrack(childId, childNode, dx, dy);
+				}
+			}
+		}
+	}
 
-		// Update port positions
+	private moveShapeAndTrack(
+		nodeId: string,
+		node: { x: number; y: number; ports: { x: number; y: number }[] },
+		dx: number,
+		dy: number,
+	): void {
+		const shapeEntry = this.session.shapes.get(nodeId);
+		if (shapeEntry) {
+			this.session.router.moveShape_delta(shapeEntry.shapeRef, dx, dy);
+		}
+		node.x += dx;
+		node.y += dy;
 		for (const port of node.ports) {
 			port.x += dx;
 			port.y += dy;
 		}
+	}
+
+	private isDescendantOf(nodeId: string, ancestorId: string): boolean {
+		let current = this.session.nodes.get(nodeId);
+		while (current) {
+			if (current.parentId === ancestorId) return true;
+			if (current.parentId === null) return false;
+			current = this.session.nodes.get(current.parentId);
+		}
+		return false;
 	}
 
 	/**
@@ -99,10 +126,12 @@ export class RoutingSession {
 		}
 
 		const srcPinClass = edge.sourcePort
-			? (this.portPinClassIds.get(edge.sourcePort) ?? CENTER_PIN_CLASS_ID)
+			? (this.session.portPinClassIds.get(edge.sourcePort) ??
+					CENTER_PIN_CLASS_ID)
 			: CENTER_PIN_CLASS_ID;
 		const tgtPinClass = edge.targetPort
-			? (this.portPinClassIds.get(edge.targetPort) ?? CENTER_PIN_CLASS_ID)
+			? (this.session.portPinClassIds.get(edge.targetPort) ??
+					CENTER_PIN_CLASS_ID)
 			: CENTER_PIN_CLASS_ID;
 
 		const srcEnd = new this.avoid.ConnEnd(srcShape.shapeRef, srcPinClass);
@@ -194,7 +223,7 @@ export async function createRoutingSession(
 
 	const session = createLibavoidSession(sessionParsed, Avoid, options);
 
-	// Register center pins for ALL non-root nodes so addEdge() can connect to any node.
+	// Register center pins for ALL non-root leaf nodes so addEdge() can connect to any node.
 	// createLibavoidSession only registers center pins for nodes referenced by existing edges.
 	const nodesWithCenterPin = new Set<string>();
 	for (const edge of normalEdges) {
@@ -216,21 +245,8 @@ export async function createRoutingSession(
 		}
 	}
 
-	// Extract portPinClassIds by re-computing (they are internal to createLibavoidSession)
-	// We need these for addEdge() support
-	const portPinClassIds = new Map<string, number>();
-	const pinClassCounters = new Map<string, number>();
-	for (const [_, node] of parsed.nodes) {
-		if (node.parentId === null) continue;
-		for (const port of node.ports) {
-			const current = pinClassCounters.get(node.id) ?? 2;
-			pinClassCounters.set(node.id, current + 1);
-			portPinClassIds.set(port.id, current);
-		}
-	}
-
 	// Run initial transaction
 	session.router.processTransaction();
 
-	return new RoutingSession(session, Avoid, portPinClassIds);
+	return new RoutingSession(session, Avoid);
 }
