@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
@@ -17,7 +18,21 @@ import { dirname, join } from "node:path";
  * ```
  */
 export function getWasmPath(): string {
-	const require = createRequire(import.meta.url);
-	const entryPath = require.resolve("libavoid-js");
-	return join(dirname(entryPath), "libavoid.wasm");
+	let entryPath: string;
+	try {
+		const require = createRequire(import.meta.url);
+		entryPath = require.resolve("libavoid-js");
+	} catch {
+		throw new Error(
+			"Could not resolve libavoid-js. Ensure it is installed as a dependency.",
+		);
+	}
+
+	const wasmPath = join(dirname(entryPath), "libavoid.wasm");
+	if (!existsSync(wasmPath)) {
+		throw new Error(
+			`Could not find libavoid.wasm at ${wasmPath}. Ensure libavoid-js is properly installed.`,
+		);
+	}
+	return wasmPath;
 }

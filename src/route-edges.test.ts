@@ -114,7 +114,9 @@ describe("basic routing", () => {
 
 		expect(route?.sourcePoint).toBeDefined();
 		expect(route?.targetPoint).toBeDefined();
-		expect(route?.bendPoints.length).toBeGreaterThan(0);
+		// Route should exist — with boundary auto-pins, the router may find a
+		// direct path (no bends) or route around (with bends) depending on pin selection.
+		expect(route?.bendPoints).toBeDefined();
 	});
 
 	it("should route 3 nodes with 2 edges", async () => {
@@ -505,8 +507,8 @@ describe("container node handling", () => {
 		if (!route) return;
 		expect(route.sourcePoint).toBeDefined();
 		expect(route.targetPoint).toBeDefined();
-		// Route should have at least 2 points (source and target)
-		expect(route.bendPoints.length + 2).toBeGreaterThanOrEqual(2);
+		// Route should have source, target, and ideally bend points to navigate around the container
+		expect(route.bendPoints).toBeDefined();
 		// Target point should be near the "inside" child node (abs x: 200+5+10=215, y: 0+5+10=15)
 		expect(route.targetPoint.x).toBeGreaterThanOrEqual(215);
 		expect(route.targetPoint.x).toBeLessThanOrEqual(215 + 60);
@@ -582,6 +584,68 @@ describe("container node handling", () => {
 		// Source from groupA (x: 0..150), target at groupB (x: 300..450)
 		expect(route.sourcePoint.x).toBeLessThanOrEqual(150);
 		expect(route.targetPoint.x).toBeGreaterThanOrEqual(300);
+	});
+
+	it("should connect at container boundary, not center", async () => {
+		// Edge from a leaf node to a container node directly to the right.
+		// With boundary pins, the edge should attach at the container's left edge (x=300),
+		// not at its center (x=375).
+		const graph: ElkGraph = {
+			children: [
+				{ height: 40, id: "leaf", width: 80, x: 0, y: 30 },
+				{
+					children: [{ height: 30, id: "child", width: 60, x: 10, y: 10 }],
+					height: 100,
+					id: "container",
+					width: 150,
+					x: 300,
+					y: 0,
+				},
+			],
+			edges: [{ id: "e1", source: "leaf", target: "container" }],
+			id: "root",
+		};
+
+		const result = await routeEdges(graph);
+		const route = result.get("e1");
+		expect(route).toBeDefined();
+		if (!route) return;
+
+		// Source exits from the leaf (x: 0..80)
+		expect(route.sourcePoint.x).toBeLessThanOrEqual(84);
+		// Target should connect at the container's left boundary (x=300),
+		// not at the center (x=375). Allow buffer distance tolerance.
+		expect(route.targetPoint.x).toBeLessThanOrEqual(305);
+		expect(route.targetPoint.x).toBeGreaterThanOrEqual(296);
+	});
+
+	it("should pick the correct container boundary side based on direction", async () => {
+		// Edge from a leaf node BELOW a container — should connect at the container's south edge.
+		const graph: ElkGraph = {
+			children: [
+				{
+					children: [{ height: 30, id: "child", width: 60, x: 10, y: 10 }],
+					height: 100,
+					id: "container",
+					width: 150,
+					x: 0,
+					y: 0,
+				},
+				{ height: 40, id: "leaf", width: 80, x: 35, y: 200 },
+			],
+			edges: [{ id: "e1", source: "container", target: "leaf" }],
+			id: "root",
+		};
+
+		const result = await routeEdges(graph);
+		const route = result.get("e1");
+		expect(route).toBeDefined();
+		if (!route) return;
+
+		// Source should exit from the container's south boundary (y=100),
+		// not from the center (y=50). Allow buffer distance tolerance.
+		expect(route.sourcePoint.y).toBeGreaterThanOrEqual(96);
+		expect(route.sourcePoint.y).toBeLessThanOrEqual(104);
 	});
 
 	it("should move children when a container node is moved", async () => {
@@ -713,5 +777,74 @@ describe("createRoutingSession", () => {
 
 		expect(() => session.processTransaction()).toThrow("destroyed");
 		expect(() => session.moveNode("n1", { x: 50, y: 50 })).toThrow("destroyed");
+	});
+
+	it("should allow double destroy without error", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
+				{ height: 40, id: "n2", width: 80, x: 200, y: 0 },
+			],
+			edges: [{ id: "e1", source: "n1", target: "n2" }],
+			id: "root",
+		};
+
+		const session = await createRoutingSession(graph);
+		session.destroy();
+		expect(() => session.destroy()).not.toThrow();
+	});
+
+	it("should support addEdge with ports", async () => {
+		const graph: ElkGraph = {
+			children: [
+				{
+					height: 40,
+					id: "n1",
+					ports: [{ height: 10, id: "p1", width: 5, x: 80, y: 15 }],
+					width: 80,
+					x: 0,
+					y: 0,
+				},
+				{
+					height: 40,
+					id: "n2",
+					ports: [{ height: 10, id: "p2", width: 5, x: -5, y: 15 }],
+					width: 80,
+					x: 200,
+					y: 0,
+				},
+				{ height: 40, id: "n3", width: 80, x: 100, y: 100 },
+			],
+			edges: [
+				{
+					id: "e1",
+					source: "n1",
+					sourcePort: "p1",
+					target: "n2",
+					targetPort: "p2",
+				},
+			],
+			id: "root",
+		};
+
+		const session = await createRoutingSession(graph);
+		try {
+			// Add an edge using auto-pins (no ports) after initial setup with port-based edges
+			session.addEdge({ id: "e2", source: "n2", target: "n3" });
+			const routes = session.processTransaction();
+			expect(routes.has("e1")).toBe(true);
+			expect(routes.has("e2")).toBe(true);
+		} finally {
+			session.destroy();
+		}
+	});
+
+	it("should reject invalid graph input", async () => {
+		await expect(
+			createRoutingSession(null as unknown as ElkGraph),
+		).rejects.toThrow("Invalid graph");
+		await expect(
+			createRoutingSession({} as unknown as ElkGraph),
+		).rejects.toThrow("Invalid graph");
 	});
 });

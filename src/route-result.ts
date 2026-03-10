@@ -11,12 +11,12 @@ function inferSide(
 	const dx = to.x - from.x;
 	const dy = to.y - from.y;
 
-	if (Math.abs(dx) >= Math.abs(dy)) {
-		if (isTarget) return dx > 0 ? "west" : "east";
-		return dx > 0 ? "east" : "west";
-	}
-	if (isTarget) return dy > 0 ? "north" : "south";
-	return dy > 0 ? "south" : "north";
+	// Zero-length segment: default to east/west
+	if (dx === 0 && dy === 0) return isTarget ? "west" : "east";
+
+	const horizontal = Math.abs(dx) >= Math.abs(dy);
+	if (horizontal) return dx > 0 === !isTarget ? "east" : "west";
+	return dy > 0 === !isTarget ? "south" : "north";
 }
 
 /**

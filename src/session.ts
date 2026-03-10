@@ -2,19 +2,17 @@ import type { Avoid } from "libavoid-js";
 import { AvoidLib } from "libavoid-js";
 import type { LibavoidSession } from "./libavoid-session";
 import {
+	AUTO_PIN_CLASS_ID,
 	createLibavoidSession,
 	destroySession,
 	extractRoutes,
+	freeWasm,
+	registerAutoPins,
 } from "./libavoid-session";
 import { parseElkGraph } from "./parser";
-import { init } from "./route-edges";
+import { init, validateGraph } from "./route-edges";
 import { buildRouteResults } from "./route-result";
 import type { ElkGraph, LibavoidRouterOptions, RouteResult } from "./types";
-
-/** Center pin class ID (must match libavoid-session.ts) */
-const CENTER_PIN_CLASS_ID = 1;
-/** ConnDir flag: all directions (must match libavoid-session.ts) */
-const CONN_DIR_ALL = 15;
 
 /**
  * A long-lived routing session that supports incremental updates.
@@ -111,6 +109,11 @@ export class RoutingSession {
 		if (this.session.connectors.has(edge.id)) {
 			throw new Error(`Edge "${edge.id}" already exists in session.`);
 		}
+		if (edge.source === edge.target) {
+			throw new Error(
+				`Edge "${edge.id}": self-loop edges (source === target) are not supported by libavoid.`,
+			);
+		}
 
 		const srcShape = this.session.shapes.get(edge.source);
 		const tgtShape = this.session.shapes.get(edge.target);
@@ -126,18 +129,31 @@ export class RoutingSession {
 		}
 
 		const srcPinClass = edge.sourcePort
-			? (this.session.portPinClassIds.get(edge.sourcePort) ??
-					CENTER_PIN_CLASS_ID)
-			: CENTER_PIN_CLASS_ID;
+			? this.session.portPinClassIds.get(edge.sourcePort)
+			: AUTO_PIN_CLASS_ID;
 		const tgtPinClass = edge.targetPort
-			? (this.session.portPinClassIds.get(edge.targetPort) ??
-					CENTER_PIN_CLASS_ID)
-			: CENTER_PIN_CLASS_ID;
+			? this.session.portPinClassIds.get(edge.targetPort)
+			: AUTO_PIN_CLASS_ID;
+
+		if (srcPinClass === undefined) {
+			throw new Error(
+				`Edge "${edge.id}": source port "${edge.sourcePort}" has no pin class`,
+			);
+		}
+		if (tgtPinClass === undefined) {
+			throw new Error(
+				`Edge "${edge.id}": target port "${edge.targetPort}" has no pin class`,
+			);
+		}
 
 		const srcEnd = new this.avoid.ConnEnd(srcShape.shapeRef, srcPinClass);
 		const tgtEnd = new this.avoid.ConnEnd(tgtShape.shapeRef, tgtPinClass);
 		const connRef = new this.avoid.ConnRef(this.session.router, srcEnd, tgtEnd);
+		freeWasm(srcEnd);
+		freeWasm(tgtEnd);
 
+		this.session.edgeEndpointNodes.add(edge.source);
+		this.session.edgeEndpointNodes.add(edge.target);
 		this.session.connectors.set(edge.id, {
 			connRef,
 			edge: { id: edge.id },
@@ -161,6 +177,11 @@ export class RoutingSession {
 	/**
 	 * Process pending changes and return updated routes.
 	 * Only edges affected by shape moves or additions are re-routed.
+	 *
+	 * **Coordinate system:** The returned {@link RouteResult} points use
+	 * **absolute** coordinates (matching the coordinate space used during
+	 * session creation). To convert to ELK-relative coordinates, subtract
+	 * the owner node's content area origin.
 	 */
 	processTransaction(): Map<string, RouteResult> {
 		this.assertNotDestroyed();
@@ -178,6 +199,14 @@ export class RoutingSession {
 			destroySession(this.session);
 			this.destroyed = true;
 		}
+	}
+
+	/**
+	 * Support for the TC39 Explicit Resource Management proposal.
+	 * Allows usage with `using session = await createRoutingSession(graph)`.
+	 */
+	[Symbol.dispose](): void {
+		this.destroy();
 	}
 
 	private assertNotDestroyed(): void {
@@ -210,6 +239,7 @@ export async function createRoutingSession(
 	graph: ElkGraph,
 	options?: LibavoidRouterOptions,
 ): Promise<RoutingSession> {
+	validateGraph(graph);
 	await init();
 
 	const Avoid = AvoidLib.getInstance();
@@ -223,25 +253,16 @@ export async function createRoutingSession(
 
 	const session = createLibavoidSession(sessionParsed, Avoid, options);
 
-	// Register center pins for ALL non-root leaf nodes so addEdge() can connect to any node.
-	// createLibavoidSession only registers center pins for nodes referenced by existing edges.
-	const nodesWithCenterPin = new Set<string>();
+	// Register auto pins for ALL nodes so addEdge() can connect to any node.
+	// createLibavoidSession only registers auto pins for nodes referenced by existing edges.
+	const nodesWithAutoPin = new Set<string>();
 	for (const edge of normalEdges) {
-		if (!edge.sourcePortId) nodesWithCenterPin.add(edge.sourceNodeId);
-		if (!edge.targetPortId) nodesWithCenterPin.add(edge.targetNodeId);
+		if (!edge.sourcePortId) nodesWithAutoPin.add(edge.sourceNodeId);
+		if (!edge.targetPortId) nodesWithAutoPin.add(edge.targetNodeId);
 	}
 	for (const [nodeId, shapeEntry] of session.shapes) {
-		if (!nodesWithCenterPin.has(nodeId)) {
-			const pin = new Avoid.ShapeConnectionPin(
-				shapeEntry.shapeRef,
-				CENTER_PIN_CLASS_ID,
-				0.5,
-				0.5,
-				true,
-				0,
-				CONN_DIR_ALL,
-			);
-			pin.setExclusive(false);
+		if (!nodesWithAutoPin.has(nodeId)) {
+			registerAutoPins(shapeEntry.shapeRef, Avoid);
 		}
 	}
 

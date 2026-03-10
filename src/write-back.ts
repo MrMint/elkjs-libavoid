@@ -17,6 +17,8 @@ function writeSimpleFormat(elkEdge: ElkEdge, points: ElkPoint[]): void {
 	elkEdge.targetPoint = points[points.length - 1];
 	if (points.length > 2) {
 		elkEdge.bendPoints = points.slice(1, -1);
+	} else {
+		delete elkEdge.bendPoints;
 	}
 	// Clean up extended format fields if forcing simple
 	delete elkEdge.sections;
@@ -54,7 +56,11 @@ function toRelativeCoords(
 	parsed: ParsedGraph,
 ): ElkPoint[] {
 	const owner = parsed.nodes.get(ownerNodeId);
-	if (!owner) return points;
+	if (!owner) {
+		throw new Error(
+			`Owner node "${ownerNodeId}" not found for coordinate transformation`,
+		);
+	}
 
 	// Edge coordinates in ELK are relative to the owner's content area (inside padding),
 	// which is the same coordinate space as the owner's children.

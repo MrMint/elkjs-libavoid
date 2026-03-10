@@ -600,4 +600,184 @@ describe("parseElkGraph", () => {
 			expect(edge.targetPortId).toBe("p2");
 		});
 	});
+
+	describe("duplicate ID detection", () => {
+		it("should throw for duplicate node IDs", () => {
+			const graph: ElkGraph = {
+				children: [
+					{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
+					{ height: 40, id: "n1", width: 80, x: 200, y: 0 },
+				],
+				id: "root",
+			};
+
+			expect(() => parseElkGraph(graph)).toThrow(
+				'Duplicate node ID "n1" found in graph',
+			);
+		});
+
+		it("should throw for duplicate edge IDs", () => {
+			const graph: ElkGraph = {
+				children: [
+					{ height: 40, id: "n1", width: 80, x: 0, y: 0 },
+					{ height: 40, id: "n2", width: 80, x: 200, y: 0 },
+					{ height: 40, id: "n3", width: 80, x: 100, y: 100 },
+				],
+				edges: [
+					{ id: "e1", source: "n1", target: "n2" },
+					{ id: "e1", source: "n2", target: "n3" },
+				],
+				id: "root",
+			};
+
+			expect(() => parseElkGraph(graph)).toThrow(
+				'Duplicate edge ID "e1" found in graph',
+			);
+		});
+
+		it("should throw for duplicate port IDs", () => {
+			const graph: ElkGraph = {
+				children: [
+					{
+						height: 40,
+						id: "n1",
+						ports: [
+							{ height: 10, id: "p1", width: 5, x: 80, y: 10 },
+							{ height: 10, id: "p1", width: 5, x: 80, y: 25 },
+						],
+						width: 80,
+						x: 0,
+						y: 0,
+					},
+				],
+				id: "root",
+			};
+
+			expect(() => parseElkGraph(graph)).toThrow(
+				'Duplicate port ID "p1" found in graph',
+			);
+		});
+	});
+
+	describe("dimension validation", () => {
+		it("should throw for node with zero width", () => {
+			const graph: ElkGraph = {
+				children: [{ height: 40, id: "n1", width: 0, x: 0, y: 0 }],
+				id: "root",
+			};
+
+			expect(() => parseElkGraph(graph)).toThrow(
+				'Node "n1" has invalid dimensions',
+			);
+		});
+
+		it("should throw for node with zero height", () => {
+			const graph: ElkGraph = {
+				children: [{ height: 0, id: "n1", width: 80, x: 0, y: 0 }],
+				id: "root",
+			};
+
+			expect(() => parseElkGraph(graph)).toThrow(
+				'Node "n1" has invalid dimensions',
+			);
+		});
+
+		it("should throw for node with negative dimensions", () => {
+			const graph: ElkGraph = {
+				children: [{ height: -10, id: "n1", width: 80, x: 0, y: 0 }],
+				id: "root",
+			};
+
+			expect(() => parseElkGraph(graph)).toThrow(
+				'Node "n1" has invalid dimensions',
+			);
+		});
+	});
+
+	describe("explicit port.side property", () => {
+		it("should use port.side property when set", () => {
+			const graph: ElkGraph = {
+				children: [
+					{
+						height: 40,
+						id: "n1",
+						ports: [
+							{
+								height: 10,
+								id: "p1",
+								properties: { "port.side": "NORTH" },
+								width: 5,
+								// Position would infer EAST, but explicit property wins
+								x: 80,
+								y: 15,
+							},
+						],
+						width: 80,
+						x: 0,
+						y: 0,
+					},
+				],
+				id: "root",
+			};
+
+			const parsed = parseElkGraph(graph);
+			expect(parsed.ports.get("p1")?.side).toBe("NORTH");
+		});
+
+		it("should use elk.port.side property when set", () => {
+			const graph: ElkGraph = {
+				children: [
+					{
+						height: 40,
+						id: "n1",
+						ports: [
+							{
+								height: 10,
+								id: "p1",
+								properties: { "elk.port.side": "SOUTH" },
+								width: 5,
+								x: 80,
+								y: 15,
+							},
+						],
+						width: 80,
+						x: 0,
+						y: 0,
+					},
+				],
+				id: "root",
+			};
+
+			const parsed = parseElkGraph(graph);
+			expect(parsed.ports.get("p1")?.side).toBe("SOUTH");
+		});
+
+		it("should handle case-insensitive port.side values", () => {
+			const graph: ElkGraph = {
+				children: [
+					{
+						height: 40,
+						id: "n1",
+						ports: [
+							{
+								height: 10,
+								id: "p1",
+								properties: { "port.side": "west" },
+								width: 5,
+								x: 80,
+								y: 15,
+							},
+						],
+						width: 80,
+						x: 0,
+						y: 0,
+					},
+				],
+				id: "root",
+			};
+
+			const parsed = parseElkGraph(graph);
+			expect(parsed.ports.get("p1")?.side).toBe("WEST");
+		});
+	});
 });

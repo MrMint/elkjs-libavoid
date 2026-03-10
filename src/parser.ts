@@ -44,14 +44,36 @@ export interface ResolvedEdge {
 
 export type PortSide = "NORTH" | "SOUTH" | "EAST" | "WEST";
 
+/** Mapping from ELK port.side property values to internal PortSide */
+const ELK_PORT_SIDE_MAP: Record<string, PortSide> = {
+	EAST: "EAST",
+	NORTH: "NORTH",
+	SOUTH: "SOUTH",
+	WEST: "WEST",
+};
+
 /**
- * Infer which side of a node a port is on based on its position relative to the node bounds.
+ * Determine which side of a node a port is on.
+ *
+ * If the port has an explicit `port.side` property (via `properties["port.side"]`
+ * or `properties["elk.port.side"]`), that value is used. Otherwise, the side is
+ * inferred from the port's position relative to the node bounds.
+ *
+ * Tie-breaking priority when inferring: EAST > WEST > NORTH > SOUTH.
  */
 function inferPortSide(
 	port: ElkPort,
 	nodeWidth: number,
 	nodeHeight: number,
 ): PortSide {
+	// Check for explicit ELK port.side property
+	const explicitSide =
+		port.properties?.["port.side"] ?? port.properties?.["elk.port.side"];
+	if (typeof explicitSide === "string") {
+		const mapped = ELK_PORT_SIDE_MAP[explicitSide.toUpperCase()];
+		if (mapped) return mapped;
+	}
+
 	const px = port.x ?? 0;
 	const py = port.y ?? 0;
 	const pw = port.width ?? 0;
@@ -140,6 +162,11 @@ function validateNode(
 			`Node "${node.id}" is missing width or height. All nodes must have dimensions.`,
 		);
 	}
+	if (width <= 0 || height <= 0) {
+		throw new Error(
+			`Node "${node.id}" has invalid dimensions (${width}x${height}). Width and height must be positive.`,
+		);
+	}
 	if (node.x === undefined || node.y === undefined) {
 		throw new Error(
 			`Node "${node.id}" is missing x or y position. All non-root nodes must be positioned.`,
@@ -177,9 +204,26 @@ function resolvePorts(
 		};
 
 		resolvedPorts.push(resolved);
+		if (ports.has(port.id)) {
+			throw new Error(`Duplicate port ID "${port.id}" found in graph`);
+		}
 		ports.set(port.id, resolved);
 	}
 	return resolvedPorts;
+}
+
+function resolvePadding(node: ElkNode): {
+	top: number;
+	right: number;
+	bottom: number;
+	left: number;
+} {
+	return {
+		bottom: node.padding?.bottom ?? 0,
+		left: node.padding?.left ?? 0,
+		right: node.padding?.right ?? 0,
+		top: node.padding?.top ?? 0,
+	};
 }
 
 function resolveEdges(
@@ -187,10 +231,15 @@ function resolveEdges(
 	nodes: Map<string, ResolvedNode>,
 	ports: Map<string, ResolvedPort>,
 	edges: ResolvedEdge[],
+	edgeIds: Set<string>,
 ): void {
 	if (!node.edges) return;
 
 	for (const edge of node.edges) {
+		if (edgeIds.has(edge.id)) {
+			throw new Error(`Duplicate edge ID "${edge.id}" found in graph`);
+		}
+		edgeIds.add(edge.id);
 		const src = resolveEdgeEndpoint(
 			edge.sources,
 			edge.source,
@@ -245,6 +294,7 @@ export function parseElkGraph(graph: ElkGraph): ParsedGraph {
 	const nodes = new Map<string, ResolvedNode>();
 	const ports = new Map<string, ResolvedPort>();
 	const edges: ResolvedEdge[] = [];
+	const edgeIds = new Set<string>();
 
 	function visitNode(
 		node: ElkNode,
@@ -258,13 +308,11 @@ export function parseElkGraph(graph: ElkGraph): ParsedGraph {
 
 		const resolvedPorts = resolvePorts(node, absX, absY, width, height, ports);
 
-		const padding = {
-			bottom: node.padding?.bottom ?? 0,
-			left: node.padding?.left ?? 0,
-			right: node.padding?.right ?? 0,
-			top: node.padding?.top ?? 0,
-		};
+		const padding = resolvePadding(node);
 
+		if (nodes.has(node.id)) {
+			throw new Error(`Duplicate node ID "${node.id}" found in graph`);
+		}
 		nodes.set(node.id, {
 			hasChildren: (node.children?.length ?? 0) > 0,
 			height,
@@ -285,7 +333,7 @@ export function parseElkGraph(graph: ElkGraph): ParsedGraph {
 			}
 		}
 
-		resolveEdges(node, nodes, ports, edges);
+		resolveEdges(node, nodes, ports, edges, edgeIds);
 	}
 
 	visitNode(graph, 0, 0, null);

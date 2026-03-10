@@ -10,18 +10,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```
 src/
-  index.ts              – Public API: re-exports init() and routeEdges()
-  route-edges.ts        – Orchestration: init WASM, parse, route, write back
+  index.ts              – Public API: re-exports init(), routeEdges(), routeEdgesInPlace(), createRoutingSession()
+  route-edges.ts        – Orchestration: init WASM, parse, route (routeEdges returns Map, routeEdgesInPlace mutates graph)
+  session.ts            – RoutingSession class for incremental updates (moveNode, addEdge, removeEdge)
   parser.ts             – Converts hierarchical ELK JSON → flat indexed representation
   libavoid-session.ts   – Creates/manages libavoid WASM router sessions
+  route-result.ts       – Builds RouteResult objects from raw point arrays
   write-back.ts         – Writes computed routes back into ELK graph edges
-  types.ts              – ELK JSON type definitions and routing options
+  types.ts              – ELK JSON type definitions, routing options, RouteResult, ConnectionSide
+  wasm-path.ts          – Node.js utility to locate the bundled libavoid.wasm file
+  node.ts               – Node.js subpath export (getWasmPath)
   parser.test.ts        – Unit tests for the parser
-tests/
   route-edges.test.ts   – Integration tests for the full routing pipeline
+  route-result.test.ts  – Unit tests for RouteResult building
+  write-back.test.ts    – Unit tests for write-back logic
 ```
 
-**Data flow:** `routeEdges()` → `parseElkGraph()` → `createLibavoidSession()` → `router.processTransaction()` → `extractRoutes()` → `writeRoutesToGraph()`
+**Data flow (one-shot):** `routeEdges()` / `routeEdgesInPlace()` → `parseElkGraph()` → `createLibavoidSession()` → `router.processTransaction()` → `extractRoutes()` → `buildRouteResults()` (or `writeRoutesToGraph()` for in-place)
+
+**Data flow (incremental):** `createRoutingSession()` → `parseElkGraph()` → `createLibavoidSession()` → `RoutingSession.moveNode()` / `addEdge()` / `removeEdge()` → `processTransaction()` → `extractRoutes()` → `buildRouteResults()`
 
 ## Common Commands
 
@@ -47,11 +54,14 @@ npm run typecheck     # TypeScript type checking only
 
 ## Important Patterns
 
-- The library modifies the input graph **in place** and also returns it
+- **Two routing APIs:** `routeEdges()` returns a `Map<string, RouteResult>` with absolute coordinates (graph untouched); `routeEdgesInPlace()` mutates the graph in place and returns it with ELK-relative coordinates
+- **Incremental routing:** `createRoutingSession()` returns a `RoutingSession` for long-lived use (e.g., drag interactions) with `moveNode()`, `addEdge()`, `removeEdge()`, and `processTransaction()`
 - Both ELK simple (`source`/`target`) and extended (`sources`/`targets`/`sections`) edge formats are supported
+- Self-loop edges (source === target) are skipped by default; set `selfLoopHandling: "fallback"` to generate synthetic routes
 - Port positions are relative to their parent node; the parser converts to absolute coordinates internally
 - `inferPortSide()` determines port direction (N/S/E/W) from position for libavoid ConnDir hints
-- WASM sessions must be properly destroyed to avoid memory leaks — `destroySession()` runs in a `finally` block
+- WASM sessions must be properly destroyed to avoid memory leaks — `destroySession()` runs in a `finally` block; `RoutingSession` also supports `Symbol.dispose`
+- In browsers, `init()` must be called with a WASM URL before using any routing API
 
 ## License
 

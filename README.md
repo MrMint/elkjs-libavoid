@@ -24,7 +24,7 @@ npm install elkjs
 
 ```ts
 import ELK from "elkjs";
-import { routeEdges } from "@mr_mint/elkjs-libavoid";
+import { routeEdgesInPlace } from "@mr_mint/elkjs-libavoid";
 
 const elk = new ELK();
 
@@ -45,43 +45,155 @@ const graph = {
 // 2. Layout nodes with ELK
 const positioned = await elk.layout(graph);
 
-// 3. Route edges with libavoid
-const routed = await routeEdges(positioned);
+// 3. Route edges with libavoid (mutates graph in place)
+const routed = await routeEdgesInPlace(positioned);
 // Edges now have sourcePoint, targetPoint, and bendPoints
+```
+
+Or use `routeEdges` to get route results without mutating the graph:
+
+```ts
+import { routeEdges } from "@mr_mint/elkjs-libavoid";
+
+const routes = await routeEdges(positioned);
+// routes is a Map<string, RouteResult> with absolute coordinates
+for (const [edgeId, route] of routes) {
+  console.log(edgeId, route.sourcePoint, route.targetPoint, route.bendPoints);
+}
 ```
 
 ## API
 
 ### `init(wasmPath?: string): Promise<void>`
 
-Pre-initialize the libavoid WASM module. This is optional — `routeEdges` will call it automatically on first use. Call it explicitly if you want to control when the WASM module loads.
+Pre-initialize the libavoid WASM module. This is optional — `routeEdges`, `routeEdgesInPlace`, and `createRoutingSession` will call it automatically on first use in Node.js. Call it explicitly if you want to control when the WASM module loads.
+
+**Browser environments:** You **must** call `init()` with a URL to the `libavoid.wasm` file before using the routing APIs. Copy `libavoid.wasm` from `node_modules/libavoid-js/dist/` to your public directory.
 
 ```ts
 import { init } from "@mr_mint/elkjs-libavoid";
 
+// Node.js — auto-detected, no path needed:
 await init();
-// or with a custom WASM path:
+
+// Browser — must provide the WASM URL:
 await init("/path/to/libavoid.wasm");
 ```
 
-### `routeEdges(graph: ElkGraph, options?: LibavoidRoutingOptions): Promise<ElkGraph>`
+### `routeEdges(graph, options?): Promise<Map<string, RouteResult>>`
 
-Compute obstacle-avoiding routes for all edges in an ELK JSON graph. Nodes must already have `x`, `y`, `width`, and `height` set. The graph is modified in place and also returned.
+Compute obstacle-avoiding routes for all edges in an ELK JSON graph. Nodes must already have `x`, `y`, `width`, and `height` set. The input graph is **not** modified.
+
+Returns a `Map` of edge ID to `RouteResult`. Coordinates are **absolute** (not relative to parent nodes).
 
 Supports both ELK simple edge format (`source`/`target`) and extended format (`sources`/`targets`/`sections`), as well as ports and hierarchical (compound) graphs.
 
 ```ts
 import { routeEdges } from "@mr_mint/elkjs-libavoid";
 
-const routed = await routeEdges(graph, {
+const routes = await routeEdges(graph, {
   routingType: "orthogonal",
   shapeBufferDistance: 8,
 });
+
+for (const [edgeId, route] of routes) {
+  // route.sourcePoint, route.targetPoint, route.bendPoints — absolute coords
+  // route.sourceSide, route.targetSide — "north" | "south" | "east" | "west"
+}
+```
+
+### `routeEdgesInPlace(graph, options?): Promise<ElkGraph>`
+
+Compute obstacle-avoiding routes and write them directly into the graph's edge objects. The graph is modified **in place** and also returned.
+
+Coordinates are written **relative** to the edge's owner node's content area (inside padding), matching the ELK JSON convention.
+
+```ts
+import { routeEdgesInPlace } from "@mr_mint/elkjs-libavoid";
+
+const routed = await routeEdgesInPlace(graph, {
+  routingType: "orthogonal",
+  shapeBufferDistance: 8,
+});
+// routed === graph, edges now have sourcePoint/targetPoint/bendPoints
+```
+
+### `createRoutingSession(graph, options?): Promise<RoutingSession>`
+
+Create a long-lived routing session for incremental updates. Use this instead of `routeEdges()` when you need to update node positions frequently (e.g., during drag operations) without re-creating the entire router on every frame.
+
+```ts
+import { createRoutingSession } from "@mr_mint/elkjs-libavoid";
+
+const session = await createRoutingSession(graph, {
+  routingType: "orthogonal",
+});
+
+// On node drag:
+session.moveNode("n1", { x: newX, y: newY });
+const routes = session.processTransaction();
+// routes is a Map<string, RouteResult> with absolute coordinates
+
+// Add/remove edges dynamically:
+session.addEdge({ id: "e3", source: "n1", target: "n3" });
+session.removeEdge("e1");
+const updatedRoutes = session.processTransaction();
+
+// Cleanup:
+session.destroy();
+```
+
+`RoutingSession` implements `Symbol.dispose` for TC39 Explicit Resource Management:
+
+```ts
+using session = await createRoutingSession(graph);
+```
+
+### `getWasmPath(): string`
+
+Node.js helper that returns the absolute path to the bundled `libavoid.wasm` file. Available from the `./node` subpath export.
+
+```ts
+import { getWasmPath } from "@mr_mint/elkjs-libavoid/node";
+
+const wasmPath = getWasmPath();
+```
+
+## Types
+
+### `RouteResult`
+
+Returned by `routeEdges()` and `RoutingSession.processTransaction()`.
+
+```ts
+interface RouteResult {
+  sourcePoint: ElkPoint;
+  targetPoint: ElkPoint;
+  bendPoints: ElkPoint[];
+  sourceSide: ConnectionSide;
+  targetSide: ConnectionSide;
+}
+```
+
+### `ConnectionSide`
+
+```ts
+type ConnectionSide = "north" | "south" | "east" | "west";
+```
+
+### `SelfLoopHandling`
+
+```ts
+type SelfLoopHandling = "skip" | "fallback";
 ```
 
 ## Options
 
-All options are optional. Pass them as the second argument to `routeEdges`.
+All options are optional. Pass them as the second argument to `routeEdges` or `routeEdgesInPlace`.
+
+### Router Options
+
+These options are shared by `routeEdges`, `routeEdgesInPlace`, and `createRoutingSession`.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -99,6 +211,15 @@ All options are optional. Pass them as the second argument to `routeEdges`.
 | `nudgeOrthogonalTouchingColinearSegments` | `boolean` | — | Nudge touching colinear segments |
 | `performUnifyingNudgingPreprocessingStep` | `boolean` | — | Preprocessing step for unified nudging |
 | `nudgeSharedPathsWithCommonEndPoint` | `boolean` | — | Nudge shared paths that share an endpoint |
+
+### Routing Options
+
+These additional options are available for `routeEdges` and `routeEdgesInPlace` only (not `createRoutingSession`).
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `edgeIds` | `string[]` | — | Only route edges with these IDs; others are left unchanged |
+| `selfLoopHandling` | `"skip" \| "fallback"` | `"skip"` | How to handle self-loop edges (source === target). `"skip"` omits them; `"fallback"` generates a synthetic route |
 
 ## Graph Format
 
@@ -119,7 +240,7 @@ elkjs-libavoid works with the [ELK JSON format](https://eclipse.dev/elk/document
 }
 ```
 
-After routing, each edge gets `sourcePoint`, `targetPoint`, and `bendPoints`.
+With `routeEdgesInPlace`, each edge gets `sourcePoint`, `targetPoint`, and `bendPoints`.
 
 ### Extended Edges
 
@@ -129,7 +250,7 @@ edges: [
 ]
 ```
 
-After routing, extended edges get a `sections` array with `startPoint`, `endPoint`, and `bendPoints`.
+With `routeEdgesInPlace`, extended edges get a `sections` array with `startPoint`, `endPoint`, and `bendPoints`.
 
 ### Ports
 

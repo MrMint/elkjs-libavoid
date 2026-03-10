@@ -1,5 +1,6 @@
 export { init, routeEdges, routeEdgesInPlace } from "./route-edges";
-export { createRoutingSession, RoutingSession } from "./session";
+export type { RoutingSession } from "./session";
+export { createRoutingSession } from "./session";
 export type {
 	ConnectionSide,
 	ElkEdge,

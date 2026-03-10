@@ -17,23 +17,37 @@ import type {
 import { writeRoutesToGraph } from "./write-back";
 
 let initPromise: Promise<void> | null = null;
+let initialWasmPath: string | undefined;
 
 /**
  * Initialize the libavoid WASM module.
- * Must be called once before routeEdges. Subsequent calls return the same promise.
  *
- * In browser environments, you must provide a URL to the libavoid.wasm file
- * (e.g. served from your app's public directory).
+ * Called automatically by {@link routeEdges}, {@link routeEdgesInPlace}, and
+ * `createRoutingSession` on first use. You can call it explicitly to control
+ * initialization timing or to provide a WASM URL in browser environments.
+ *
+ * Subsequent calls return the same promise (the `wasmPath` from the first call wins).
+ * A warning is logged if a subsequent call provides a different `wasmPath`.
+ *
+ * In browser environments, you **must** call this with a URL to the libavoid.wasm
+ * file (e.g. served from your app's public directory) before using the routing APIs.
  */
 export async function init(wasmPath?: string): Promise<void> {
 	if (!initPromise) {
+		initialWasmPath = wasmPath;
 		initPromise = AvoidLib.load(wasmPath).catch((err: unknown) => {
 			initPromise = null;
+			initialWasmPath = undefined;
 			if (isBrowserEnvironment() && !wasmPath) {
 				throw wrapBrowserWasmError(err);
 			}
 			throw err;
 		});
+	} else if (wasmPath !== undefined && wasmPath !== initialWasmPath) {
+		console.warn(
+			`elkjs-libavoid: init() already called with a different wasmPath ("${initialWasmPath}"). ` +
+				`The new path ("${wasmPath}") will be ignored.`,
+		);
 	}
 	return initPromise;
 }
@@ -98,9 +112,13 @@ function partitionEdges(
 	edges: ResolvedEdge[],
 	edgeIds?: string[],
 ): { normalEdges: ResolvedEdge[]; selfLoopEdges: ResolvedEdge[] } {
-	const filtered = edgeIds
-		? edges.filter((e) => new Set(edgeIds).has(e.id))
-		: edges;
+	let filtered: ResolvedEdge[];
+	if (edgeIds) {
+		const idSet = new Set(edgeIds);
+		filtered = edges.filter((e) => idSet.has(e.id));
+	} else {
+		filtered = edges;
+	}
 
 	const normalEdges: ResolvedEdge[] = [];
 	const selfLoopEdges: ResolvedEdge[] = [];
@@ -147,31 +165,64 @@ function buildSelfLoopResults(
 	return results;
 }
 
-async function ensureInit(): Promise<void> {
-	if (!initPromise) {
-		await init();
-	} else {
-		await initPromise;
+/**
+ * Build self-loop raw point routes (for writeRoutesToGraph in the in-place path).
+ */
+function buildSelfLoopPointRoutes(
+	selfLoopEdges: ResolvedEdge[],
+	parsed: ParsedGraph,
+	bufferDistance: number,
+): Map<string, ElkPoint[]> {
+	const routes = new Map<string, ElkPoint[]>();
+	for (const edge of selfLoopEdges) {
+		const node = parsed.nodes.get(edge.sourceNodeId);
+		if (!node) continue;
+
+		const loop = generateSelfLoopRoute(
+			node.x,
+			node.y,
+			node.width,
+			node.height,
+			bufferDistance,
+		);
+		routes.set(edge.id, loop.points);
 	}
+	return routes;
 }
 
 /**
- * Route edges on an ELK JSON graph using libavoid.
- *
- * Returns a Map of edge ID → RouteResult. The input graph is NOT modified.
- * Automatically initializes the WASM module on first call if not already done.
+ * Shared routing pipeline: init WASM, parse graph, create session, route, extract.
+ * The session creation is inside try/finally to prevent WASM leaks on partial failure.
  */
-export async function routeEdges(
+export function validateGraph(graph: unknown): asserts graph is ElkGraph {
+	if (!graph || typeof graph !== "object") {
+		throw new Error(
+			`Invalid graph: expected an ELK JSON graph object, got ${typeof graph}`,
+		);
+	}
+	if (!("id" in graph) || typeof (graph as ElkGraph).id !== "string") {
+		throw new Error(
+			'Invalid graph: missing required "id" property of type string',
+		);
+	}
+}
+
+async function executeRouting(
 	graph: ElkGraph,
 	options?: LibavoidRoutingOptions,
-): Promise<Map<string, RouteResult>> {
-	await ensureInit();
+): Promise<{
+	parsed: ParsedGraph;
+	rawRoutes: Map<string, ElkPoint[]>;
+	selfLoopEdges: ResolvedEdge[];
+}> {
+	validateGraph(graph);
+	await init();
 
 	const Avoid = AvoidLib.getInstance();
 	const parsed = parseElkGraph(graph);
 
 	if (parsed.edges.length === 0) {
-		return new Map();
+		return { parsed, rawRoutes: new Map(), selfLoopEdges: [] };
 	}
 
 	const { normalEdges, selfLoopEdges } = partitionEdges(
@@ -179,7 +230,7 @@ export async function routeEdges(
 		options?.edgeIds,
 	);
 
-	let results = new Map<string, RouteResult>();
+	let rawRoutes = new Map<string, ElkPoint[]>();
 
 	if (normalEdges.length > 0) {
 		const session = createLibavoidSession(
@@ -189,11 +240,36 @@ export async function routeEdges(
 		);
 		try {
 			session.router.processTransaction();
-			results = buildRouteResults(extractRoutes(session));
+			rawRoutes = extractRoutes(session);
 		} finally {
 			destroySession(session);
 		}
 	}
+
+	return { parsed, rawRoutes, selfLoopEdges };
+}
+
+/**
+ * Route edges on an ELK JSON graph using libavoid.
+ *
+ * Returns a Map of edge ID → RouteResult. The input graph is NOT modified.
+ * Automatically initializes the WASM module on first call if not already done
+ * (Node.js only; in browsers, call {@link init} with a WASM URL first).
+ *
+ * **Coordinate system:** The returned {@link RouteResult} points use
+ * **absolute** coordinates. If you need coordinates relative to the edge's
+ * owner node (as in ELK JSON), use {@link routeEdgesInPlace} instead.
+ */
+export async function routeEdges(
+	graph: ElkGraph,
+	options?: LibavoidRoutingOptions,
+): Promise<Map<string, RouteResult>> {
+	const { parsed, rawRoutes, selfLoopEdges } = await executeRouting(
+		graph,
+		options,
+	);
+
+	const results = buildRouteResults(rawRoutes);
 
 	if ((options?.selfLoopHandling ?? "skip") === "fallback") {
 		const loopResults = buildSelfLoopResults(
@@ -214,57 +290,30 @@ export async function routeEdges(
  *
  * This is the backward-compatible API that writes routes directly
  * into the graph's edge objects.
+ *
+ * **Coordinate system:** Edge routes are written as coordinates **relative**
+ * to the edge's owner node's content area (inside padding), matching the
+ * ELK JSON convention. This differs from {@link routeEdges}, which returns
+ * absolute coordinates.
  */
 export async function routeEdgesInPlace(
 	graph: ElkGraph,
 	options?: LibavoidRoutingOptions,
 ): Promise<ElkGraph> {
-	await ensureInit();
-
-	const Avoid = AvoidLib.getInstance();
-	const parsed = parseElkGraph(graph);
-
-	if (parsed.edges.length === 0) {
-		return graph;
-	}
-
-	const { normalEdges, selfLoopEdges } = partitionEdges(
-		parsed.edges,
-		options?.edgeIds,
+	const { parsed, rawRoutes, selfLoopEdges } = await executeRouting(
+		graph,
+		options,
 	);
 
-	if (normalEdges.length > 0) {
-		const session = createLibavoidSession(
-			{ ...parsed, edges: normalEdges },
-			Avoid,
-			options,
-		);
-		try {
-			session.router.processTransaction();
-			const rawRoutes = extractRoutes(session);
-			writeRoutesToGraph(rawRoutes, parsed);
-		} finally {
-			destroySession(session);
-		}
-	}
+	writeRoutesToGraph(rawRoutes, parsed);
 
 	if ((options?.selfLoopHandling ?? "skip") === "fallback") {
-		for (const edge of selfLoopEdges) {
-			const node = parsed.nodes.get(edge.sourceNodeId);
-			if (!node) continue;
-
-			const loop = generateSelfLoopRoute(
-				node.x,
-				node.y,
-				node.width,
-				node.height,
-				options?.shapeBufferDistance ?? 4,
-			);
-			writeRoutesToGraph(new Map([[edge.id, loop.points]]), {
-				...parsed,
-				edges: [edge],
-			});
-		}
+		const loopRoutes = buildSelfLoopPointRoutes(
+			selfLoopEdges,
+			parsed,
+			options?.shapeBufferDistance ?? 4,
+		);
+		writeRoutesToGraph(loopRoutes, parsed);
 	}
 
 	return graph;
