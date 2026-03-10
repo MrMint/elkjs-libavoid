@@ -1,5 +1,17 @@
 # @mr_mint/elkjs-libavoid
 
+## 0.5.0
+
+### Minor Changes
+
+- a8186b2: Replace center-pin connection strategy with boundary auto-pins (4 per side, 16 total) for more natural edge attachment positions. Add `Symbol.dispose` support to `RoutingSession` for TC39 explicit resource management. `init()` now warns when called again with a different `wasmPath`. `RoutingSession.addEdge()` now validates port pin classes and rejects self-loop edges. `writeRoutesToGraph` throws on missing owner node instead of silently skipping. `getWasmPath()` provides descriptive errors when libavoid-js is missing.
+
+### Patch Changes
+
+- a8186b2: Fix `inferSide` to handle zero-length edge segments (identical source and target points) by defaulting to east/west instead of falling through ambiguous comparison logic.
+- a8186b2: Fix WASM memory leaks: wrap `extractRoutes` and `createLibavoidSession` in `try/finally` to ensure all Emscripten objects (`displayRoute`, `Point`, `Rectangle`, `ConnEnd`) are freed on error. Replace `freeWasm(obj: any)` with `freeWasm(obj: unknown)` using runtime type narrowing.
+- a8186b2: Improve parser validation: detect duplicate node, edge, and port IDs; reject nodes with zero or negative dimensions. Support explicit `port.side` and `elk.port.side` properties on ports (case-insensitive), falling back to positional inference when not set.
+
 ## 0.4.0
 
 ### Minor Changes
